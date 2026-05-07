@@ -35,8 +35,8 @@ class Go2MargOraclePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     """Task-specific PPO runner config for Unitree-Go2-MARG-Oracle tasks."""
 
     runner_class_name = "unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_runner:Go2MargOracleRunner"
-    num_steps_per_env = 24
-    max_iterations = 50000
+    num_steps_per_env = 25
+    max_iterations = 30000
     save_interval = 100
     task_type = "velocity"  # Can be "velocity" or "risk_terrain"
     experiment_name = "go2_marg_oracle_velocity"

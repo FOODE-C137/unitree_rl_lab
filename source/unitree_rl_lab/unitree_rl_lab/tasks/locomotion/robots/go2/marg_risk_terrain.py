@@ -448,7 +448,7 @@ class MargRiskTerrainCfg(SubTerrainBaseCfg):
     # - `spawn_size`: (width_x, width_y) in meters
     # - `spawn_height`: height in meters (kept at 1.0m in terrain generation)
     # - `spawn_center`: fractions (0..1) of terrain size (sx, sy), default center (0.5, 0.5)
-    spawn_size: tuple[float, float] = (1.5, 1.5)
+    spawn_size: tuple[float, float] = (2, 2)
     spawn_height: float | None = 1.0
     spawn_center: tuple[float, float] = (0.5, 0.5)
 

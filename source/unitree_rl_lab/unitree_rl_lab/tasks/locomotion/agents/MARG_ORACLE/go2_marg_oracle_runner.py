@@ -189,7 +189,11 @@ class Go2MargOracleRunner:
 
         ep_string = ""
         if locs["ep_infos"]:
-            for key in locs["ep_infos"][0]:
+            all_keys = set()
+            for ep_info in locs["ep_infos"]:
+                all_keys.update(ep_info.keys())
+
+            for key in sorted(all_keys):
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs["ep_infos"]:
                     if key not in ep_info:

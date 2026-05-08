@@ -53,8 +53,8 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
     
-    num_envs: int = 512
-    # num_envs: int = 4096
+    # num_envs: int = 512
+    num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -245,9 +245,9 @@ def reset_base_with_terrain_orientation(
     velocities = root_states[:, 7:13].clone()
     yaws = torch.empty((num_envs,), device=asset.device)
     
-    # Randomize position in x-y within +-0.5m
-    pos_offsets[:, 0] = torch.rand(num_envs, device=asset.device) * 1.0 - 0.5
-    pos_offsets[:, 1] = torch.rand(num_envs, device=asset.device) * 1.0 - 0.5
+    # Randomize position in x-y within +-0.2m
+    pos_offsets[:, 0] = torch.rand(num_envs, device=asset.device) * 0.4 - 0.2
+    pos_offsets[:, 1] = torch.rand(num_envs, device=asset.device) * 0.4 - 0.2
     
     # Set yaw based on terrain type
     for i, _env_id in enumerate(env_ids):
@@ -615,12 +615,13 @@ class RewardsCfg:
 
     # -- footholds
     feet_air_time = RewTerm(
-        func=mdp.feet_air_time,
+        func=mdp.feet_air_time_low_speed_gating,
         weight=1.0,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "command_name": "base_velocity",
             "threshold": 0.5,
+            "speed_threshold": 0.1,
         },
     )
     feet_stumble = RewTerm(
@@ -635,6 +636,16 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "command_name": "base_velocity",
+        },
+    )
+    feet_swing_alignment = RewTerm(
+        func=mdp.feet_swing_alignment,
+        weight=0.5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
+            "command_name": "base_velocity",
+            "max_swing_time": 0.5,
         },
     )
 

@@ -327,3 +327,119 @@ def feet_center(
     penalty = torch.sum(per_foot_penalty, dim=1)
 
     return penalty
+
+
+def feet_air_time_low_speed_gating(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str = "base_velocity",
+    threshold: float = 0.5,
+    speed_threshold: float = 0.1,
+) -> torch.Tensor:
+    """Reward feet air time with strict low-speed gating.
+
+    Computes feet air time reward, but completely disables it when robot speed is below a threshold.
+    This ensures the reward is only active during active locomotion, not during static or near-static states.
+
+    Args:
+        env: The environment.
+        sensor_cfg: Configuration for the contact sensor.
+        command_name: Name of the command being tracked (e.g., "base_velocity").
+        threshold: Minimum air time in seconds to earn reward.
+        speed_threshold: Minimum command speed (xy norm) to enable the reward. Below this, reward is 0.
+
+    Returns:
+        The air time reward tensor.
+    """
+    from isaaclab.sensors import ContactSensor
+    
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    
+    # Compute first contact and air time
+    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    
+    # Base reward calculation
+    reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
+    
+    # Strict low-speed gating: only reward if speed is above threshold
+    cmd = env.command_manager.get_command(command_name)
+    cmd_norm = torch.norm(cmd[:, :2], dim=1)
+    reward *= (cmd_norm > speed_threshold).float()
+    
+    return reward
+
+
+def feet_swing_alignment(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "base_velocity",
+    max_swing_time: float = 0.5,
+) -> torch.Tensor:
+    """Reward stride length and direction alignment during swing phase.
+    
+    Rewards each foot for moving in the direction of the velocity command during swing phase.
+    The reward combines:
+    - Distance traveled in XY plane (longer strides = higher reward)
+    - Alignment with velocity command direction (angle between motion and command)
+    
+    Each foot is evaluated independently. Feet are only rewarded during active swing phases.
+    
+    Args:
+        env: The environment
+        sensor_cfg: Contact sensor configuration
+        asset_cfg: Robot asset configuration  
+        command_name: Name of velocity command (default "base_velocity")
+        max_swing_time: Maximum swing time to consider (beyond this, foot likely caught on obstacle)
+        
+    Returns:
+        Reward tensor of shape (num_envs,) - sum of per-foot rewards
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+    
+    # Get velocity command direction in XY plane
+    cmd = env.command_manager.get_command(command_name)  # [num_envs, 3]
+    cmd_xy = cmd[:, :2]  # [num_envs, 2]
+    cmd_norm = torch.norm(cmd_xy, dim=1, keepdim=True)  # [num_envs, 1]
+    cmd_dir = cmd_xy / (cmd_norm + 1e-6)  # [num_envs, 2] - normalized command direction
+    
+    # Get current foot positions in world frame (XY only)
+    current_foot_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :2]  # [num_envs, num_feet, 2]
+    
+    # Initialize cache for last contact positions if not exists
+    if not hasattr(env, "_foot_contact_pos_cache"):
+        env._foot_contact_pos_cache = current_foot_pos.clone()
+    
+    # Get contact and air time information
+    contact_forces_w = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]  # [num_envs, num_feet, 3]
+    feet_in_contact = torch.norm(contact_forces_w, dim=-1) > 1.0  # [num_envs, num_feet]
+    
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]  # [num_envs, num_feet]
+    
+    # Detect feet in valid swing phase: recently lifted off, within max swing time
+    in_valid_swing = (last_air_time > 0.0) & (last_air_time <= max_swing_time)  # [num_envs, num_feet]
+    
+    # Calculate displacement from last contact position
+    foot_displacement = current_foot_pos - env._foot_contact_pos_cache  # [num_envs, num_feet, 2]
+    foot_distance = torch.norm(foot_displacement, dim=-1, keepdim=True)  # [num_envs, num_feet, 1]
+    
+    # Calculate directional alignment (cosine similarity with command direction)
+    # Avoid division by zero for stationary feet
+    foot_dir = foot_displacement / (foot_distance + 1e-6)  # [num_envs, num_feet, 2]
+    alignment_cosine = torch.sum(foot_dir * cmd_dir.unsqueeze(1), dim=-1)  # [num_envs, num_feet]
+    alignment_cosine = torch.clamp(alignment_cosine, -1.0, 1.0)  # Numerical stability
+    
+    # Reward = stride_distance * max(alignment, 0) * in_swing_phase
+    # Only positive alignment contributes to reward
+    alignment_reward = torch.clamp(alignment_cosine, min=0.0)  # [num_envs, num_feet]
+    per_foot_reward = foot_distance.squeeze(-1) * alignment_reward * in_valid_swing.float()
+    
+    # Update cache: when feet touch down, record their current position for next swing phase
+    env._foot_contact_pos_cache[feet_in_contact] = current_foot_pos[feet_in_contact]
+    
+    # Sum rewards across all feet
+    total_reward = torch.sum(per_foot_reward, dim=1)
+    
+    return total_reward

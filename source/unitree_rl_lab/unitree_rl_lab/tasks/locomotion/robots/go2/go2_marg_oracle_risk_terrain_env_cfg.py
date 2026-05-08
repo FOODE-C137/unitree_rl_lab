@@ -436,12 +436,12 @@ class ObservationsCfg:
 
     @configclass
     class ProprioHistoryObsCfg(ProprioObsCfg):
-        """5-step proprio history, flattened to 225D."""
+        """5(+1)-step proprio history, flattened to 270D."""
 
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
-            self.history_length = 5
+            self.history_length = 5 + 1  # include current step
             self.flatten_history_dim = True
 
     proprio_history_obs: ProprioHistoryObsCfg = ProprioHistoryObsCfg()

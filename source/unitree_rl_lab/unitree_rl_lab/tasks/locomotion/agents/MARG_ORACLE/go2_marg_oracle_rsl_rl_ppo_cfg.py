@@ -19,8 +19,7 @@ class Go2MargOracleActorCriticCfg(RslRlPpoActorCriticCfg):
 
     # Observation dimensions
     proprioception = 45
-    properioception_current = 33
-    policy_history_obs_dim = 225
+    proprioception_history = 270
     terrain_height = 187
     privileged = 42
 

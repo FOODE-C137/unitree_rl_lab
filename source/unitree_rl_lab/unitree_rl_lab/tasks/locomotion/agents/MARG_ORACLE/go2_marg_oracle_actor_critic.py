@@ -26,8 +26,7 @@ class Go2MargOracleActorCritic(nn.Module):
         self,
         num_actions,
         proprioception: int = 45,
-        proprioception_current: int = 33,
-        proprioception_history: int = 225, # proprioception * 5 past steps
+        proprioception_history: int = 270, # proprioception * 6 past steps
         terrain_height: int = 187,
         privileged: int = 42,
         terrain_hidden_dims: list[int] = [128, 64],
@@ -49,7 +48,6 @@ class Go2MargOracleActorCritic(nn.Module):
             )
 
         self.proprioception = proprioception
-        self.proprioception_current = proprioception_current
         self.proprioception_history = proprioception_history
         self.terrain_height = terrain_height
         self.privileged = privileged
@@ -71,7 +69,7 @@ class Go2MargOracleActorCritic(nn.Module):
         # ====================== EstimatorNet ======================
         # 256*128*7
         self.estimator_net = _build_mlp(
-            proprioception_history + proprioception_current,
+            proprioception_history,
             estimator_hidden_dims,
             estimator_output_dim,
             activation_name=self.estimator_activation,
@@ -135,8 +133,7 @@ class Go2MargOracleActorCritic(nn.Module):
         terrain_obs = observations["policy_terrain_obs"]
 
         terrain_feat = self.elevation_net(terrain_obs)
-        current_proprio = raw_obs[:, : self.proprioception_current]
-        estimator_input = torch.cat((history_obs, current_proprio), dim=-1)
+        estimator_input = history_obs
         est_feat = self.estimator_net(estimator_input)
         self._latest_estimator_output = est_feat
         return torch.cat((raw_obs, terrain_feat, est_feat), dim=-1)
@@ -175,6 +172,5 @@ class Go2MargOracleActorCritic(nn.Module):
     def estimate(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
         raw_obs = observations["policy_raw_obs"]
         history_obs = observations["policy_history_obs"]
-        current_proprio = raw_obs[:, : self.proprioception_current]
-        estimator_input = torch.cat((history_obs, current_proprio), dim=-1)
+        estimator_input = history_obs
         return self.estimator_net(estimator_input)

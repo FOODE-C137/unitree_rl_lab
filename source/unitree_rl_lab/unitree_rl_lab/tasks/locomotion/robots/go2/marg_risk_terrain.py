@@ -467,9 +467,9 @@ MARG_RISK_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "single_gap": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="single_gap"),
         "stones_everywhere": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="stones_everywhere"),
-        "stones_2rows": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="stones_2rows"),
-        "stones_balance": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="stones_balance"),
-        "beams_balance": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="beams_balance"),
-        "air_beams_balance": MargRiskTerrainCfg(proportion=1 / 6, terrain_type="air_beams_balance"),
+        "stones_2rows": MargRiskTerrainCfg(proportion=0 / 6, terrain_type="stones_2rows"),
+        "stones_balance": MargRiskTerrainCfg(proportion=0 / 6, terrain_type="stones_balance"),
+        "beams_balance": MargRiskTerrainCfg(proportion=0 / 6, terrain_type="beams_balance"),
+        "air_beams_balance": MargRiskTerrainCfg(proportion=0 / 6, terrain_type="air_beams_balance"),
     },
 )

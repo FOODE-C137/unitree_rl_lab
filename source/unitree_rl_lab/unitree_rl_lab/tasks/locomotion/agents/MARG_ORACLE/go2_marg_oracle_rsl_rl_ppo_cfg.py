@@ -11,11 +11,20 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 class Go2MargOracleActorCriticCfg(RslRlPpoActorCriticCfg):
     class_name = "unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_actor_critic:Go2MargOracleActorCritic"
 
-    policy_raw_obs_dim = 45
-    policy_history_obs_dim = 225
-    policy_terrain_obs_dim = 187
-    privileged_obs_dim = 42
+    # Network architecture
+    actor_hidden_dims = [512, 256, 128]
+    critic_hidden_dims = [512, 256, 128]
+    activation = "elu"
+    init_noise_std = 1.0
 
+    # Observation dimensions
+    proprioception = 45
+    properioception_current = 33
+    policy_history_obs_dim = 225
+    terrain_height = 187
+    privileged = 42
+
+    # Sub-network dimensions
     terrain_hidden_dims = [128, 64]
     terrain_feat_dim = 16
 
@@ -51,8 +60,8 @@ class Go2MargOraclePPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     policy = Go2MargOracleActorCriticCfg(
         init_noise_std=1.0,
-        actor_hidden_dims=[256, 128, 64],
-        critic_hidden_dims=[256, 128, 64],
+        actor_hidden_dims=[512, 256, 128],
+        critic_hidden_dims=[512, 256, 128],
         activation="elu",
     )
 

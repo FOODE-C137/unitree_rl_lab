@@ -24,20 +24,18 @@ class Go2MargOracleActorCritic(nn.Module):
 
     def __init__(
         self,
-        num_actor_obs,
-        num_critic_obs,
         num_actions,
-        policy_raw_obs_dim: int = 45,
-        current_proprio_dim: int = 33,
-        policy_history_obs_dim: int = 225,
-        policy_terrain_obs_dim: int = 187,
-        privileged_obs_dim: int = 42,
-        terrain_hidden_dims: list[int] | None = None,
+        proprioception: int = 45,
+        proprioception_current: int = 33,
+        proprioception_history: int = 225, # proprioception * 5 past steps
+        terrain_height: int = 187,
+        privileged: int = 42,
+        terrain_hidden_dims: list[int] = [128, 64],
         terrain_feat_dim: int = 16,
-        estimator_hidden_dims: list[int] | None = None,
+        estimator_hidden_dims: list[int] = [256, 128],
         estimator_output_dim: int = 7,
-        actor_hidden_dims: list[int] | None = None,
-        critic_hidden_dims: list[int] | None = None,
+        actor_hidden_dims: list[int] = [512, 256, 128],
+        critic_hidden_dims: list[int] = [512, 256, 128],
         activation: str = "elu",
         init_noise_std: float = 1.0,
         noise_std_type: str = "scalar",
@@ -50,32 +48,54 @@ class Go2MargOracleActorCritic(nn.Module):
                 + str([key for key in kwargs.keys()])
             )
 
-        terrain_hidden_dims = terrain_hidden_dims or [128, 64]
-        estimator_hidden_dims = estimator_hidden_dims or [256, 128]
-        actor_hidden_dims = actor_hidden_dims or [256, 128, 64]
-        critic_hidden_dims = critic_hidden_dims or [256, 128, 64]
-
-        self.policy_raw_obs_dim = policy_raw_obs_dim
-        self.current_proprio_dim = current_proprio_dim
-        self.policy_history_obs_dim = policy_history_obs_dim
-        self.policy_terrain_obs_dim = policy_terrain_obs_dim
-        self.privileged_obs_dim = privileged_obs_dim
+        self.proprioception = proprioception
+        self.proprioception_current = proprioception_current
+        self.proprioception_history = proprioception_history
+        self.terrain_height = terrain_height
+        self.privileged = privileged
         self.terrain_feat_dim = terrain_feat_dim
         self.estimator_output_dim = estimator_output_dim
+        self.estimator_activation = "relu"
+        self.elevation_activation = "relu"
 
+
+        # ====================== ElevationNet ======================
+        # 128*64*16
         self.elevation_net = _build_mlp(
-            policy_terrain_obs_dim, terrain_hidden_dims, terrain_feat_dim, activation_name=activation
+            terrain_height, 
+            terrain_hidden_dims, 
+            terrain_feat_dim, 
+            activation_name=self.elevation_activation
         )
+        
+        # ====================== EstimatorNet ======================
+        # 256*128*7
         self.estimator_net = _build_mlp(
-            policy_history_obs_dim + current_proprio_dim,
+            proprioception_history + proprioception_current,
             estimator_hidden_dims,
             estimator_output_dim,
-            activation_name=activation,
+            activation_name=self.estimator_activation,
         )
-        actor_input_dim = policy_raw_obs_dim + terrain_feat_dim + estimator_output_dim
-        critic_input_dim = policy_raw_obs_dim + privileged_obs_dim + terrain_feat_dim
-        self.actor = _build_mlp(actor_input_dim, actor_hidden_dims, num_actions, activation_name=activation)
-        self.critic = _build_mlp(critic_input_dim, critic_hidden_dims, 1, activation_name=activation)
+        
+        
+        actor_input_dim = proprioception + terrain_feat_dim + estimator_output_dim
+        critic_input_dim = proprioception + privileged + terrain_feat_dim
+        
+        # ====================== ActorNet ======================
+        # 512*256*128*12
+        self.actor = _build_mlp(
+            actor_input_dim, 
+            actor_hidden_dims, 
+            num_actions, 
+            activation_name=activation)
+        
+        # ====================== CriticNet ======================
+        # 512*256*128*1
+        self.critic = _build_mlp(
+            critic_input_dim, 
+            critic_hidden_dims, 
+            1, 
+            activation_name=activation)
 
         print(f"ElevationNet: {self.elevation_net}")
         print(f"EstimatorNet: {self.estimator_net}")
@@ -115,7 +135,7 @@ class Go2MargOracleActorCritic(nn.Module):
         terrain_obs = observations["policy_terrain_obs"]
 
         terrain_feat = self.elevation_net(terrain_obs)
-        current_proprio = raw_obs[:, : self.current_proprio_dim]
+        current_proprio = raw_obs[:, : self.proprioception_current]
         estimator_input = torch.cat((history_obs, current_proprio), dim=-1)
         est_feat = self.estimator_net(estimator_input)
         self._latest_estimator_output = est_feat
@@ -155,6 +175,6 @@ class Go2MargOracleActorCritic(nn.Module):
     def estimate(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
         raw_obs = observations["policy_raw_obs"]
         history_obs = observations["policy_history_obs"]
-        current_proprio = raw_obs[:, : self.current_proprio_dim]
+        current_proprio = raw_obs[:, : self.proprioception_current]
         estimator_input = torch.cat((history_obs, current_proprio), dim=-1)
         return self.estimator_net(estimator_input)

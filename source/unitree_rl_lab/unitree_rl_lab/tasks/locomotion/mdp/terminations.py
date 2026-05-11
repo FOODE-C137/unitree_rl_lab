@@ -13,8 +13,8 @@ def terminate_stationary_for_duration(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     command_name: str = "base_velocity",
-    duration: float = 10.0,
-    distance_threshold: float = 0.10,
+    duration: float = 5.0,
+    distance_threshold: float = 0.50,
     command_speed_threshold: float = 0.05,
 ) -> torch.Tensor:
     """Terminate moving-command episodes if the robot stays near the same XY position too long."""

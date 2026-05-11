@@ -214,8 +214,9 @@ def reset_base_with_terrain_orientation(
     """Reset base position and orientation based on terrain type.
     
     For linear terrain types (stones_2rows, stones_balance, beams_balance, air_beams_balance),
-    the robot's initial yaw is set to either +x or -x direction.
-    For other terrain types, yaw is randomized.
+    the robot's initial yaw is aligned to +x direction with ±5° deviation.
+    Position offset is ±10cm from spawn center in xy plane.
+    For other terrain types, yaw is randomized and position offset is ±20cm.
     """
     # Get the asset and terrain information
     asset = env.scene[asset_cfg.name]
@@ -245,11 +246,10 @@ def reset_base_with_terrain_orientation(
     velocities = root_states[:, 7:13].clone()
     yaws = torch.empty((num_envs,), device=asset.device)
     
-    # Randomize position in x-y within +-0.2m
-    pos_offsets[:, 0] = torch.rand(num_envs, device=asset.device) * 0.4 - 0.2
-    pos_offsets[:, 1] = torch.rand(num_envs, device=asset.device) * 0.4 - 0.2
+    # 5 degrees in radians (±5° tolerance)
+    angle_tolerance = 5.0 * math.pi / 180.0  # ≈ 0.0873 rad
     
-    # Set yaw based on terrain type
+    # Set yaw and position offset based on terrain type
     for i, _env_id in enumerate(env_ids):
         terrain_col = int(terrain_types[i].item())
         ratio = terrain_col / float(MARG_RISK_TERRAIN_GENERATOR_CFG.num_cols) + 0.001
@@ -260,9 +260,15 @@ def reset_base_with_terrain_orientation(
 
         terrain_name = terrain_names[sub_index]
         if terrain_name in LINEAR_TERRAIN_TYPES:
-            yaws[i] = 0.0
+            # For linear terrain: yaw = 0 with ±5° deviation, position offset ±10cm
+            yaws[i] = torch.rand(1, device=asset.device).item() * 2 * angle_tolerance - angle_tolerance
+            pos_offsets[i, 0] = torch.rand(1, device=asset.device).item() * 0.2 - 0.1
+            pos_offsets[i, 1] = torch.rand(1, device=asset.device).item() * 0.2 - 0.1
         else:
+            # For other terrain: random yaw, position offset ±20cm
             yaws[i] = torch.rand(1, device=asset.device).item() * 2.0 * math.pi - math.pi
+            pos_offsets[i, 0] = torch.rand(1, device=asset.device).item() * 0.4 - 0.2
+            pos_offsets[i, 1] = torch.rand(1, device=asset.device).item() * 0.4 - 0.2
 
     # Compose root pose: position in world frame + yaw-only orientation in quaternion.
     positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + pos_offsets
@@ -581,6 +587,11 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # -- task
+    stand_still = RewTerm(
+        func=mdp.stand_still,
+        weight=-0.5,
+    )
+    
     track_lin_vel_xy = RewTerm(
         func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )

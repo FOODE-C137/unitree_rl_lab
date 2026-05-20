@@ -226,6 +226,7 @@ class Go2MargOracleRunner:
             f"{'#' * width}\n"
             f"{iter_header:^{width}}\n\n"
             f"{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"
+            f"{'Num environments:':>{pad}} {self.env.num_envs}\n"
             f"{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"
         )
         for key, value in locs["loss_dict"].items():

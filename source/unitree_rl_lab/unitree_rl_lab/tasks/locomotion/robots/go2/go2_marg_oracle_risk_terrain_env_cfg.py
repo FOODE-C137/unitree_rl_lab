@@ -53,8 +53,8 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
     
-    num_envs: int = 512
-    # num_envs: int = 4096
+    # num_envs: int = 512
+    num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -299,8 +299,8 @@ class TerminationsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "command_name": "base_velocity",
-            "duration": 10.0,
-            "distance_threshold": 0.10,
+            "duration": 1.0,
+            "distance_threshold": 1.50,
             "command_speed_threshold": 0.05,
         },
     )
@@ -642,7 +642,7 @@ class RewardsCfg:
     )
     feet_center = RewTerm(
         func=mdp.feet_center,
-        weight=-0.01,
+        weight=-0.1,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),

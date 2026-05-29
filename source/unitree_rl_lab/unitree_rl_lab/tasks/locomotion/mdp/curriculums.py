@@ -84,10 +84,14 @@ def terrain_levels_vel(
     asset: Articulation = env.scene[asset_cfg.name]
     terrain: TerrainImporter = env.scene.terrain
     command = env.command_manager.get_command("base_velocity")
-    # compute the distance the robot walked
-    distance = torch.norm(asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1)
+    # Compute the distance walked relative to the reset pose inside each terrain tile.
+    # This mirrors MGDP's gap-parkour curriculum, where the configured initial x/y offset
+    # is subtracted before checking progress.
+    root_pos_in_terrain = asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2]
+    init_pos_in_terrain = asset.data.default_root_state[env_ids, :2]
+    distance = torch.norm(root_pos_in_terrain - init_pos_in_terrain, dim=1)
     # robots that walked far enough progress to harder terrains
-    move_up = distance > terrain.cfg.terrain_generator.size[0] / 2.5
+    move_up = distance > terrain.cfg.terrain_generator.size[0] / 2.0
     # robots that walked less than half of their required distance go to simpler terrains
     move_down = distance < torch.norm(command[env_ids, :2], dim=1) * env.max_episode_length_s * 0.5
     move_down *= ~move_up

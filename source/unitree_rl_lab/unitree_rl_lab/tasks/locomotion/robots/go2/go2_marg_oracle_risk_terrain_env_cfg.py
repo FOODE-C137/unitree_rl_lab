@@ -22,7 +22,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
-from .marg_risk_terrain import MARG_RISK_TERRAIN_GENERATOR_CFG
+from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
 from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
 from .velocity_env_cfg import TerminationsCfg as BaseTerminationsCfg
@@ -42,8 +42,8 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 
 # =========================== Terrain Config ===========================
 # ======================================================================
-# marg_risk_terrain.py
-# The terrain generator samples beam widths and gap sizes from uniform distributions. 
+# mgdp_terrain.py
+# MGDP-style terrain generator ported to Isaac Sim / Isaac Lab.
 
 
 
@@ -60,7 +60,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
-        terrain_generator=MARG_RISK_TERRAIN_GENERATOR_CFG,
+        terrain_generator=MGDP_TERRAIN_GENERATOR_CFG,
         max_init_terrain_level=1,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -213,7 +213,7 @@ def reset_base_with_terrain_orientation(
 ):
     """Reset base position and orientation based on terrain type.
     
-    For linear terrain types (stones_2rows, stones_balance, beams_balance, air_beams_balance),
+    For MGDP directional terrain types,
     the robot's initial yaw is aligned to +x direction with ±5° deviation.
     Position offset is ±10cm from spawn center in xy plane.
     For other terrain types, yaw is randomized and position offset is ±20cm.
@@ -227,15 +227,15 @@ def reset_base_with_terrain_orientation(
     else:
         env_ids = env_ids.to(asset.device)
     
-    # Define terrain types that need fixed orientation
-    LINEAR_TERRAIN_TYPES = {"stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"}
-    
+    terrain_generator_cfg = terrain.cfg.terrain_generator
+    directional_terrain_types = set(terrain_generator_cfg.sub_terrains.keys())
+
     # Get terrain column indices (which terrain column each env is on)
     terrain_types = terrain.terrain_types[env_ids]
-    terrain_names = list(MARG_RISK_TERRAIN_GENERATOR_CFG.sub_terrains.keys())
+    terrain_names = list(terrain_generator_cfg.sub_terrains.keys())
 
     # In curriculum terrains, terrain_types stores column index, not direct sub-terrain index.
-    proportions = np.array([sub_cfg.proportion for sub_cfg in MARG_RISK_TERRAIN_GENERATOR_CFG.sub_terrains.values()])
+    proportions = np.array([sub_cfg.proportion for sub_cfg in terrain_generator_cfg.sub_terrains.values()])
     proportions = proportions / np.sum(proportions)
     cumulative = np.cumsum(proportions)
     
@@ -252,15 +252,15 @@ def reset_base_with_terrain_orientation(
     # Set yaw and position offset based on terrain type
     for i, _env_id in enumerate(env_ids):
         terrain_col = int(terrain_types[i].item())
-        ratio = terrain_col / float(MARG_RISK_TERRAIN_GENERATOR_CFG.num_cols) + 0.001
+        ratio = terrain_col / float(terrain_generator_cfg.num_cols) + 0.001
         sub_index = int(np.searchsorted(cumulative, ratio, side="left"))
 
         if sub_index >= len(terrain_names):
             sub_index = len(terrain_names) - 1
 
         terrain_name = terrain_names[sub_index]
-        if terrain_name in LINEAR_TERRAIN_TYPES:
-            # For linear terrain: yaw = 0 with ±5° deviation, position offset ±10cm
+        if terrain_name in directional_terrain_types:
+            # For directional MGDP terrain: yaw = 0 with ±5° deviation, position offset ±10cm.
             yaws[i] = torch.rand(1, device=asset.device).item() * 2 * angle_tolerance - angle_tolerance
             pos_offsets[i, 0] = torch.rand(1, device=asset.device).item() * 0.2 - 0.1
             pos_offsets[i, 1] = torch.rand(1, device=asset.device).item() * 0.2 - 0.1
@@ -698,6 +698,9 @@ class RobotEnvCfg(BaseRobotEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         super().__post_init__()
+        # MGDP heightfield terrains create denser contact patches than the box-based
+        # risk terrains, so the default 2**26 collision stack can overflow on GPU.
+        self.sim.physx.gpu_collision_stack_size = max(self.sim.physx.gpu_collision_stack_size, 2**27)
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
@@ -707,8 +710,8 @@ class RobotEnvCfg(BaseRobotEnvCfg):
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
 
-        # Restrict sideways/yaw commands only on linear terrain types.
-        linear_terrains = {"stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"}
+        # Restrict sideways/yaw commands on MGDP directional terrain types.
+        linear_terrains = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
         terrain_names = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
 
         if terrain_names & linear_terrains:

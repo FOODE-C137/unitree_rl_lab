@@ -3,7 +3,6 @@ import math
 import torch
 import numpy as np
 import isaaclab.sim as sim_utils
-import isaaclab.terrains as terrain_gen
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
@@ -25,7 +24,13 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
 from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
-from .velocity_env_cfg import TerminationsCfg as BaseTerminationsCfg
+
+
+OMNIDIRECTIONAL_TERRAIN_TYPES = {"single_gap"}
+
+
+def _active_subterrain_count(terrain_generator_cfg) -> int:
+    return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
 
 
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
@@ -228,7 +233,7 @@ def reset_base_with_terrain_orientation(
         env_ids = env_ids.to(asset.device)
     
     terrain_generator_cfg = terrain.cfg.terrain_generator
-    directional_terrain_types = set(terrain_generator_cfg.sub_terrains.keys())
+    directional_terrain_types = set(terrain_generator_cfg.sub_terrains.keys()) - OMNIDIRECTIONAL_TERRAIN_TYPES
 
     # Get terrain column indices (which terrain column each env is on)
     terrain_types = terrain.terrain_types[env_ids]
@@ -711,7 +716,7 @@ class RobotEnvCfg(BaseRobotEnvCfg):
                 self.scene.terrain.terrain_generator.curriculum = False
 
         # Restrict sideways/yaw commands on MGDP directional terrain types.
-        linear_terrains = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
+        linear_terrains = set(self.scene.terrain.terrain_generator.sub_terrains.keys()) - OMNIDIRECTIONAL_TERRAIN_TYPES
         terrain_names = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
 
         if terrain_names & linear_terrains:
@@ -725,6 +730,6 @@ class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 256
-        self.scene.terrain.terrain_generator.num_rows = 8
-        self.scene.terrain.terrain_generator.num_cols = 6
+        self.scene.terrain.terrain_generator.num_rows = 8  # terrain levels
+        self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

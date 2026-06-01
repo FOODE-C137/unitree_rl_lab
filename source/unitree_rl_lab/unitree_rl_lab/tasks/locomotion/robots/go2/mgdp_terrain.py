@@ -8,31 +8,14 @@ from isaaclab.utils import configclass
 
 
 MGDP_GAP_PARKOUR_WEIGHTS = {
-    "single_gap": 0.002,
-    "step_stone": 0.101,
-    "stones_2rows": 0.101,
-    "stones_1row": 0.101,
-    "single_bridge": 0.101,
-    "air_beams": 0.101,
-    "air_stone": 0.101,
-    "hurdle": 0.101,
-    "ramp": 0.101,
-    "corridor": 1.1,
+    "single_gap": 0.1,
+    "step_stone": 0.1,
+    "stones_2rows": 0.1,
+    "stones_1row": 0.1,
+    "single_bridge": 0.1,
+    "air_beams": 0.1,
+    "air_stone": 0.1,
 }
-
-MGDP_MIX_WEIGHTS = {
-    "slope_down": 0.2,
-    "pyramid": 0.2,
-    "stairs_down": 0.2,
-    "stairs_up": 0.2,
-    "discrete_obstacles": 1.1,
-    "hurdle": 0.2,
-    "gap": 1.2,
-    "ramp": 1.1,
-    "new_stairs_up": 0.3,
-    "pit": 1.0,
-}
-
 
 class _SubTerrain:
     def __init__(self, size: tuple[float, float], horizontal_scale: float, vertical_scale: float):
@@ -81,105 +64,6 @@ def _clear_spawn_platform(terrain: _SubTerrain, platform_size: float, height_uni
     y1 = (terrain.length + platform) // 2
     _fill_rect(terrain, x0, x1, y0, y1, height_units)
     return x0, x1, y0, y1
-
-
-def _random_uniform_terrain(
-    terrain: _SubTerrain,
-    rng: np.random.Generator,
-    min_height: float,
-    max_height: float,
-    step: float = 0.005,
-    downsampled_scale: float = 0.5,
-) -> None:
-    min_h = _height_to_units(terrain, min_height)
-    max_h = _height_to_units(terrain, max_height)
-    step_h = max(1, abs(_height_to_units(terrain, step)))
-    heights = np.arange(min_h, max_h + step_h, step_h, dtype=np.int16)
-    if heights.size == 0:
-        return
-
-    ds = max(terrain.horizontal_scale, float(downsampled_scale))
-    ds_rows = max(2, int(round(terrain.width * terrain.horizontal_scale / ds)))
-    ds_cols = max(2, int(round(terrain.length * terrain.horizontal_scale / ds)))
-    coarse = rng.choice(heights, size=(ds_rows, ds_cols)).astype(np.float32)
-
-    x_src = np.linspace(0.0, 1.0, ds_rows)
-    y_src = np.linspace(0.0, 1.0, ds_cols)
-    x_dst = np.linspace(0.0, 1.0, terrain.width)
-    y_dst = np.linspace(0.0, 1.0, terrain.length)
-    rows = np.stack([np.interp(y_dst, y_src, row) for row in coarse], axis=0)
-    full = np.stack([np.interp(x_dst, x_src, rows[:, j]) for j in range(rows.shape[1])], axis=1)
-    terrain.height_field_raw += np.rint(full).astype(np.int16)
-
-
-def _pyramid_sloped_terrain(terrain: _SubTerrain, slope: float, platform_size: float = 3.0) -> None:
-    x = np.arange(0, terrain.width)
-    y = np.arange(0, terrain.length)
-    center_x = terrain.width // 2
-    center_y = terrain.length // 2
-    xx, yy = np.meshgrid(x, y, sparse=True)
-    xx = (center_x - np.abs(center_x - xx)) / max(center_x, 1)
-    yy = (center_y - np.abs(center_y - yy)) / max(center_y, 1)
-    max_height = int(slope * (terrain.horizontal_scale / terrain.vertical_scale) * (terrain.width / 2))
-    terrain.height_field_raw += (max_height * xx.reshape(terrain.width, 1) * yy.reshape(1, terrain.length)).astype(
-        np.int16
-    )
-
-    platform = max(1, _meter_to_index(terrain, platform_size) // 2)
-    x0, x1 = center_x - platform, center_x + platform
-    y0, y1 = center_y - platform, center_y + platform
-    min_h = min(int(terrain.height_field_raw[x0, y0]), 0)
-    max_h = max(int(terrain.height_field_raw[x0, y0]), 0)
-    terrain.height_field_raw = np.clip(terrain.height_field_raw, min_h, max_h).astype(np.int16)
-    _fill_rect(terrain, x0, x1, y0, y1, int(terrain.height_field_raw[x0, y0]))
-
-
-def _pyramid_stairs_terrain(terrain: _SubTerrain, step_width: float, step_height: float, platform_size: float = 2.0):
-    step_w = max(1, _meter_to_index(terrain, step_width))
-    step_h = _height_to_units(terrain, step_height)
-    platform = max(1, _meter_to_index(terrain, platform_size))
-    height = 0
-    start_x = 0
-    stop_x = terrain.width
-    start_y = 0
-    stop_y = terrain.length
-    while (stop_x - start_x) > platform and (stop_y - start_y) > platform:
-        start_x += step_w
-        stop_x -= step_w
-        start_y += step_w
-        stop_y -= step_w
-        height += step_h
-        _fill_rect(terrain, start_x, stop_x, start_y, stop_y, height)
-
-
-def _discrete_obstacles_terrain(
-    terrain: _SubTerrain,
-    rng: np.random.Generator,
-    max_height: float,
-    min_size: float = 1.0,
-    max_size: float = 2.5,
-    num_rects: int = 20,
-    platform_size: float = 3.0,
-) -> None:
-    max_h = max(1, abs(_height_to_units(terrain, max_height)))
-    min_s = max(1, _meter_to_index(terrain, min_size))
-    max_s = max(min_s + 1, _meter_to_index(terrain, max_size))
-    heights = np.array([-max_h, -max_h // 2, max_h // 2, max_h], dtype=np.int16)
-    for _ in range(num_rects):
-        width = int(rng.integers(min_s, max_s))
-        length = int(rng.integers(min_s, max_s))
-        x0 = int(rng.integers(0, max(1, terrain.width - width)))
-        y0 = int(rng.integers(0, max(1, terrain.length - length)))
-        _fill_rect(terrain, x0, x0 + width, y0, y0 + length, int(rng.choice(heights)))
-    _clear_spawn_platform(terrain, platform_size)
-
-
-def _pit_terrain(terrain: _SubTerrain, depth: float, platform_size: float = 4.0) -> None:
-    depth_units = -abs(_height_to_units(terrain, depth))
-    platform = max(1, _meter_to_index(terrain, platform_size) // 2)
-    cx = terrain.width // 2
-    cy = terrain.length // 2
-    _fill_rect(terrain, cx - platform, cx + platform, cy - platform, cy + platform, depth_units)
 
 
 def _parkour_gap_terrain(terrain: _SubTerrain, difficulty: float, depth: float = 0.6, platform_size: float = 2.0):
@@ -244,41 +128,6 @@ def _stones_everywhere(
     _fill_rect(terrain, 0, platform, (terrain.length - platform) // 2, (terrain.length + platform) // 2, 0)
 
 
-def _beam_path_terrain(
-    terrain: _SubTerrain,
-    rng: np.random.Generator,
-    difficulty: float,
-    depth: float = 0.6,
-    platform_size: float = 2.0,
-    cross: bool = False,
-):
-    depth_units = -abs(_height_to_units(terrain, depth))
-    terrain.height_field_raw[:, :] = depth_units
-    platform = max(1, _meter_to_index(terrain, platform_size))
-    beam_len = int(np.clip(_meter_to_index(terrain, 0.35 - 0.1 * difficulty), 2, 8))
-    beam_width_min = _meter_to_index(terrain, 0.75)
-    beam_width_max = _meter_to_index(terrain, 1.5)
-    gap = int(np.clip(_meter_to_index(terrain, 0.1 + 0.4 * difficulty), 2, 12))
-    max_h = int(np.clip(_height_to_units(terrain, 0.05 + 0.18 * difficulty), 1, 35))
-    heights = np.arange(0, max_h + 1, step=max(1, max_h // 5), dtype=np.int16)
-
-    x = platform
-    while x < terrain.width:
-        width = int(rng.integers(max(3, beam_width_min), max(4, beam_width_max)))
-        y0 = terrain.length // 2 - width // 2
-        _fill_rect(terrain, x, x + beam_len, y0, y0 + width, _choice(heights, rng))
-        x += beam_len + gap
-
-    if cross:
-        side_width = max(1, _meter_to_index(terrain, 0.12 + 0.1 * (1.0 - difficulty)))
-        y0 = terrain.length // 2 - _meter_to_index(terrain, 0.35)
-        y1 = terrain.length // 2 + _meter_to_index(terrain, 0.35)
-        _fill_rect(terrain, platform, terrain.width, y0 - side_width, y0, 0)
-        _fill_rect(terrain, platform, terrain.width, y1, y1 + side_width, 0)
-
-    _fill_rect(terrain, 0, platform, (terrain.length - platform) // 2, (terrain.length + platform) // 2, 0)
-
-
 def _air_beam_meshes(
     terrain: _SubTerrain,
     rng: np.random.Generator,
@@ -318,46 +167,6 @@ def _air_stone_meshes(
         meshes.append(_make_box_xy(stone_x, stone_y, z + 0.06, 0.12, x, 0.5 * sy))
         x += stone_x + max(0.15, 0.25 + 0.35 * difficulty)
     return meshes
-
-
-def _hurdle_terrain(terrain: _SubTerrain, rng: np.random.Generator, difficulty: float, depth: float = 0.6):
-    terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, depth))
-    corridor_w = _meter_to_index(terrain, 0.9)
-    y0 = terrain.length // 2 - corridor_w // 2
-    _fill_rect(terrain, 0, terrain.width, y0, y0 + corridor_w, 0)
-    hurdle_h = _height_to_units(terrain, rng.uniform(0.1 + 0.35 * difficulty, 0.2 + 0.45 * difficulty))
-    hurdle_x = max(3, _meter_to_index(terrain, 0.45))
-    gap = max(6, _meter_to_index(terrain, 2.4 - 0.6 * difficulty))
-    x = _meter_to_index(terrain, 2.2)
-    while x < terrain.width - _meter_to_index(terrain, 1.0):
-        _fill_rect(terrain, x, x + hurdle_x, y0, y0 + corridor_w, hurdle_h)
-        x += hurdle_x + gap
-    _clear_spawn_platform(terrain, 2.0)
-
-
-def _half_sloped_terrain(terrain: _SubTerrain, difficulty: float, depth: float = 0.6, platform_size: float = 2.0):
-    terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, depth))
-    platform = max(1, _meter_to_index(terrain, platform_size))
-    start = _meter_to_index(terrain, 0.25)
-    end = max(start + 1, (terrain.width - platform) // 2)
-    slope_units = max(1, int(2 * (difficulty * 2.5 + 1)))
-    xs = np.arange(start, end)
-    heights = (slope_units * (xs - start)).astype(np.int16)
-    terrain.height_field_raw[start:end, :] = heights[:, None]
-    top_h = int(heights[-1]) if heights.size else 0
-    _fill_rect(terrain, end, end + platform, 0, terrain.length, top_h)
-    for i, x in enumerate(range(end + platform, terrain.width)):
-        terrain.height_field_raw[x, :] = max(0, top_h - i * slope_units)
-    _clear_spawn_platform(terrain, platform_size)
-
-
-def _corridor_terrain(terrain: _SubTerrain, difficulty: float, depth: float = 0.6, platform_size: float = 2.0):
-    terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, depth))
-    width = max(0.35, 1.0 - 0.55 * difficulty)
-    corridor_w = _meter_to_index(terrain, width)
-    y0 = terrain.length // 2 - corridor_w // 2
-    _fill_rect(terrain, 0, terrain.width, y0, y0 + corridor_w, 0)
-    _fill_rect(terrain, 0, _meter_to_index(terrain, platform_size), y0 - corridor_w, y0 + 2 * corridor_w, 0)
 
 
 def _make_box_xy(size_x: float, size_y: float, top_z: float, height: float, center_x: float, center_y: float):
@@ -429,33 +238,11 @@ def _spawn_origin(terrain: _SubTerrain, clearance: float = 0.08) -> np.ndarray:
 
 
 def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh.Trimesh], np.ndarray]:
-    terrain_type = cfg.terrain_type or _terrain_type_from_seed(getattr(cfg, "seed", None), cfg.mode)
+    terrain_type = cfg.terrain_type or _terrain_type_from_seed(getattr(cfg, "seed", None))
     rng = _rng_from_seed(getattr(cfg, "seed", None), difficulty, terrain_type)
     terrain = _SubTerrain(cfg.size, cfg.horizontal_scale, cfg.vertical_scale)
 
-    slope = 0.4 * difficulty
-    step_height = 0.05 + 0.18 * difficulty
-    obstacle_height = 0.05 + 0.2 * difficulty
-
-    if terrain_type == "plane":
-        pass
-    elif terrain_type == "slope_down":
-        _pyramid_sloped_terrain(terrain, -slope, platform_size=3.0)
-    elif terrain_type == "pyramid":
-        _pyramid_sloped_terrain(terrain, slope, platform_size=3.0)
-        _random_uniform_terrain(terrain, rng, -0.05, 0.05, downsampled_scale=0.2)
-    elif terrain_type == "stairs_down":
-        _pyramid_stairs_terrain(terrain, 0.31, -step_height, platform_size=3.0)
-    elif terrain_type in ("stairs_up", "new_stairs_up"):
-        _pyramid_stairs_terrain(terrain, 0.31 if terrain_type == "stairs_up" else 0.5, step_height, platform_size=3.0)
-    elif terrain_type == "discrete_obstacles":
-        _discrete_obstacles_terrain(terrain, rng, obstacle_height)
-    elif terrain_type == "pit":
-        _pit_terrain(terrain, depth=max(0.1, difficulty), platform_size=4.0)
-    elif terrain_type == "gap":
-        gap = 0.5 * difficulty if difficulty < 0.1 else 0.1 + difficulty / terrain.horizontal_scale
-        _parkour_gap_terrain(terrain, gap * terrain.horizontal_scale, depth=0.5, platform_size=2.0)
-    elif terrain_type == "single_gap":
+    if terrain_type == "single_gap":
         _parkour_gap_terrain(terrain, difficulty, depth=0.6, platform_size=2.0)
     elif terrain_type == "step_stone":
         _stones_everywhere(terrain, rng, difficulty, depth=0.6, platform_size=2.0)
@@ -465,14 +252,6 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
         _stones_everywhere(terrain, rng, difficulty, one_row=True, depth=0.6, platform_size=2.0)
     elif terrain_type == "single_bridge":
         _single_bridge_terrain(terrain, difficulty, depth=0.6, platform_size=2.0)
-    elif terrain_type == "hurdle":
-        _hurdle_terrain(terrain, rng, difficulty, depth=0.6)
-    elif terrain_type == "ramp":
-        _half_sloped_terrain(terrain, difficulty, depth=0.6, platform_size=2.0)
-    elif terrain_type == "corridor":
-        _corridor_terrain(terrain, difficulty, depth=0.6, platform_size=2.0)
-    elif terrain_type in ("step_beams", "rotation_beams", "narrow_beams", "cross_beams"):
-        _beam_path_terrain(terrain, rng, difficulty, depth=0.6, platform_size=2.0, cross=terrain_type == "cross_beams")
     elif terrain_type == "air_beams":
         terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, 0.6))
         _clear_spawn_platform(terrain, 2.0)
@@ -481,12 +260,6 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
         _clear_spawn_platform(terrain, 2.0)
     else:
         raise ValueError(f"Unknown MGDP terrain type: {terrain_type}")
-
-    if cfg.add_roughness and terrain_type not in ("air_stone",):
-        max_height = (cfg.roughness_height[1] - cfg.roughness_height[0]) * difficulty + cfg.roughness_height[0]
-        height = float(rng.uniform(cfg.roughness_height[0], max_height))
-        _random_uniform_terrain(terrain, rng, -height, height, step=0.005, downsampled_scale=cfg.downsampled_scale)
-        _clear_spawn_platform(terrain, 2.0)
 
     meshes = [_heightfield_to_trimesh(terrain.height_field_raw, terrain.horizontal_scale, terrain.vertical_scale, cfg.slope_threshold)]
     if terrain_type == "air_beams" and cfg.add_air_beams:
@@ -497,8 +270,8 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
     return meshes, _spawn_origin(terrain)
 
 
-def _terrain_type_from_seed(seed: int | None, mode: str) -> str:
-    terrain_types = list(MGDP_GAP_PARKOUR_WEIGHTS if mode == "gap_parkour" else MGDP_MIX_WEIGHTS)
+def _terrain_type_from_seed(seed: int | None) -> str:
+    terrain_types = list(MGDP_GAP_PARKOUR_WEIGHTS)
     base = 0 if seed is None else int(seed)
     return terrain_types[base % len(terrain_types)]
 
@@ -508,13 +281,9 @@ class MGDPTerrainCfg(SubTerrainBaseCfg):
     function = mgdp_terrain
 
     terrain_type: str | None = None
-    mode: str = "gap_parkour"
     horizontal_scale: float = 0.05
     vertical_scale: float = 0.005
     slope_threshold: float | None = 0.75
-    add_roughness: bool = True
-    roughness_height: tuple[float, float] = (0.01, 0.04)
-    downsampled_scale: float = 0.5
     add_air_beams: bool = True
     add_air_stones: bool = True
 
@@ -531,26 +300,8 @@ MGDP_GAP_PARKOUR_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
     curriculum=True,
     use_cache=False,
     sub_terrains={
-        name: MGDPTerrainCfg(proportion=weight, terrain_type=name, mode="gap_parkour")
+        name: MGDPTerrainCfg(proportion=weight, terrain_type=name)
         for name, weight in MGDP_GAP_PARKOUR_WEIGHTS.items()
-    },
-)
-
-
-MGDP_MIX_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
-    size=(8.0, 8.0),
-    border_width=20.0,
-    num_rows=20,
-    num_cols=10,
-    horizontal_scale=0.05,
-    vertical_scale=0.005,
-    slope_threshold=0.75,
-    difficulty_range=(0.0, 1.0),
-    curriculum=True,
-    use_cache=False,
-    sub_terrains={
-        name: MGDPTerrainCfg(proportion=weight, terrain_type=name, mode="mix", add_air_beams=False, add_air_stones=False)
-        for name, weight in MGDP_MIX_WEIGHTS.items()
     },
 )
 

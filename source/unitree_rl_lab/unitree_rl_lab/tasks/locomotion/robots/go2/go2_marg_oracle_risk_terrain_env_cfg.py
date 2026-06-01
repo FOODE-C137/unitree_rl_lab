@@ -1,7 +1,6 @@
 import math
 
 import torch
-import numpy as np
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
@@ -26,9 +25,6 @@ from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
 
 
-OMNIDIRECTIONAL_TERRAIN_TYPES = {"single_gap"}
-
-
 def _active_subterrain_count(terrain_generator_cfg) -> int:
     return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
 
@@ -45,20 +41,12 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 )
 
 
-# =========================== Terrain Config ===========================
-# ======================================================================
-# mgdp_terrain.py
-# MGDP-style terrain generator ported to Isaac Sim / Isaac Lab.
-
-
-
 # =========================== Scene Config ===========================
 # ====================================================================
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
-    
-    # num_envs: int = 512
+
     num_envs: int = 4096
     env_spacing: float = 2.5
 
@@ -201,14 +189,6 @@ def randomize_motor_strength(
             actuator.effort_limit[env_ids[:, None], local_ids] = (
                 actuator._default_effort_limit[env_ids[:, None], local_ids] * selected_strength
             )
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
-    sky_light = AssetBaseCfg(
-        prim_path="/World/skyLight",
-        spawn=sim_utils.DomeLightCfg(
-            intensity=750.0,
-            texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
-        ),
-    )
 
 
 def reset_base_with_terrain_orientation(
@@ -216,66 +196,27 @@ def reset_base_with_terrain_orientation(
     env_ids: torch.Tensor | None,
     asset_cfg: SceneEntityCfg,
 ):
-    """Reset base position and orientation based on terrain type.
-    
-    For MGDP directional terrain types,
-    the robot's initial yaw is aligned to +x direction with ±5° deviation.
+    """Reset base position and orientation for directional MGDP terrains.
+
+    The robot's initial yaw is aligned to +x direction with ±5° deviation.
     Position offset is ±10cm from spawn center in xy plane.
-    For other terrain types, yaw is randomized and position offset is ±20cm.
     """
-    # Get the asset and terrain information
     asset = env.scene[asset_cfg.name]
-    terrain = env.scene.terrain
-    
+
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=asset.device)
     else:
         env_ids = env_ids.to(asset.device)
-    
-    terrain_generator_cfg = terrain.cfg.terrain_generator
-    directional_terrain_types = set(terrain_generator_cfg.sub_terrains.keys()) - OMNIDIRECTIONAL_TERRAIN_TYPES
 
-    # Get terrain column indices (which terrain column each env is on)
-    terrain_types = terrain.terrain_types[env_ids]
-    terrain_names = list(terrain_generator_cfg.sub_terrains.keys())
-
-    # In curriculum terrains, terrain_types stores column index, not direct sub-terrain index.
-    proportions = np.array([sub_cfg.proportion for sub_cfg in terrain_generator_cfg.sub_terrains.values()])
-    proportions = proportions / np.sum(proportions)
-    cumulative = np.cumsum(proportions)
-    
-    # Initialize from default root state to keep base height and nominal dynamics sane.
     num_envs = len(env_ids)
     root_states = asset.data.default_root_state[env_ids].clone()
     pos_offsets = torch.zeros((num_envs, 3), device=asset.device)
     velocities = root_states[:, 7:13].clone()
-    yaws = torch.empty((num_envs,), device=asset.device)
-    
-    # 5 degrees in radians (±5° tolerance)
-    angle_tolerance = 5.0 * math.pi / 180.0  # ≈ 0.0873 rad
-    
-    # Set yaw and position offset based on terrain type
-    for i, _env_id in enumerate(env_ids):
-        terrain_col = int(terrain_types[i].item())
-        ratio = terrain_col / float(terrain_generator_cfg.num_cols) + 0.001
-        sub_index = int(np.searchsorted(cumulative, ratio, side="left"))
 
-        if sub_index >= len(terrain_names):
-            sub_index = len(terrain_names) - 1
+    angle_tolerance = 5.0 * math.pi / 180.0
+    yaws = torch.empty((num_envs,), device=asset.device).uniform_(-angle_tolerance, angle_tolerance)
+    pos_offsets[:, 0:2] = torch.empty((num_envs, 2), device=asset.device).uniform_(-0.1, 0.1)
 
-        terrain_name = terrain_names[sub_index]
-        if terrain_name in directional_terrain_types:
-            # For directional MGDP terrain: yaw = 0 with ±5° deviation, position offset ±10cm.
-            yaws[i] = torch.rand(1, device=asset.device).item() * 2 * angle_tolerance - angle_tolerance
-            pos_offsets[i, 0] = torch.rand(1, device=asset.device).item() * 0.2 - 0.1
-            pos_offsets[i, 1] = torch.rand(1, device=asset.device).item() * 0.2 - 0.1
-        else:
-            # For other terrain: random yaw, position offset ±20cm
-            yaws[i] = torch.rand(1, device=asset.device).item() * 2.0 * math.pi - math.pi
-            pos_offsets[i, 0] = torch.rand(1, device=asset.device).item() * 0.4 - 0.2
-            pos_offsets[i, 1] = torch.rand(1, device=asset.device).item() * 0.4 - 0.2
-
-    # Compose root pose: position in world frame + yaw-only orientation in quaternion.
     positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + pos_offsets
     orientations = math_utils.quat_from_euler_xyz(
         torch.zeros_like(yaws),
@@ -291,7 +232,7 @@ def reset_base_with_terrain_orientation(
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
-    
+
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_contact = DoneTerm(
         func=mdp.illegal_contact,
@@ -309,7 +250,7 @@ class TerminationsCfg:
             "command_speed_threshold": 0.05,
         },
     )
-    
+
     feet_on_base_plane_linear = DoneTerm(
         func=mdp.terminate_feet_on_base_plane_selected_terrains,
         params={
@@ -510,6 +451,9 @@ class ObservationsCfg:
     class PolicyHistoryObsCfg(ProprioHistoryObsCfg):
         """Current policy history obs, same as proprio history obs."""
 
+        def __post_init__(self):
+            super().__post_init__()
+
     policy_history_obs: PolicyHistoryObsCfg = PolicyHistoryObsCfg()
 
     @configclass
@@ -565,9 +509,8 @@ class ObservationsCfg:
         """Compatibility group required by current RL wrappers."""
 
     critic: CriticCfg = CriticCfg()
-    
-    
-    
+
+
 # =========================== Action Space ================================
 # =========================================================================
 @configclass
@@ -654,17 +597,6 @@ class RewardsCfg:
             "command_name": "base_velocity",
         },
     )
-    
-    # feet_swing_alignment = RewTerm(
-    #     func=mdp.feet_swing_alignment,
-    #     weight=0.5,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-    #         "command_name": "base_velocity",
-    #         "max_swing_time": 0.5,
-    #     },
-    # )
 
 
 
@@ -715,15 +647,12 @@ class RobotEnvCfg(BaseRobotEnvCfg):
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
 
-        self.scene.terrain.terrain_generator.num_rows = 8  # terrain levels
+        self.scene.terrain.terrain_generator.num_rows = 16  # terrain levels
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
 
-        # Restrict sideways/yaw commands on MGDP directional terrain types.
-        linear_terrains = set(self.scene.terrain.terrain_generator.sub_terrains.keys()) - OMNIDIRECTIONAL_TERRAIN_TYPES
-        terrain_names = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
-
-        if terrain_names & linear_terrains:
-            self.commands.base_velocity.restricted_terrain_types = tuple(sorted(terrain_names & linear_terrains))
+        # Restrict sideways/yaw commands on all MGDP terrain types.
+        terrain_names = self.scene.terrain.terrain_generator.sub_terrains.keys()
+        self.commands.base_velocity.restricted_terrain_types = tuple(sorted(terrain_names))
 
 
 @configclass

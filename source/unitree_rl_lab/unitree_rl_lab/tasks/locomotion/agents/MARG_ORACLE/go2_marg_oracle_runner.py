@@ -23,7 +23,7 @@ class Go2MargOracleRunner:
     def __init__(self, env, train_cfg: dict, log_dir: str | None = None, device="cpu"):
         self.cfg = train_cfg
         self.alg_cfg = train_cfg["algorithm"]
-        self.policy_cfg = train_cfg["policy"]
+        self.policy_cfg = dict(train_cfg["policy"])
         self.device = device
         self.env = env
 
@@ -34,6 +34,15 @@ class Go2MargOracleRunner:
 
         actor_obs_dict = {key: obs_dict[key].to(self.device) for key in actor_obs_keys}
         critic_obs_dict = {key: obs_dict[key].to(self.device) for key in critic_obs_keys}
+
+        self.policy_cfg.update(
+            {
+                "proprioception": actor_obs_dict["policy_raw_obs"].shape[1],
+                "proprioception_history": actor_obs_dict["policy_history_obs"].shape[1],
+                "terrain_height": actor_obs_dict["policy_terrain_obs"].shape[1],
+                "privileged": critic_obs_dict["privileged_obs"].shape[1],
+            }
+        )
 
         policy_class = _import_class(self.policy_cfg.pop("class_name"))
         policy = policy_class(

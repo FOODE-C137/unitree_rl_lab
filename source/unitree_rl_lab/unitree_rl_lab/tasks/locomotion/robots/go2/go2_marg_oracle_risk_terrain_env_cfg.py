@@ -58,8 +58,8 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
     
-    # num_envs: int = 512
-    num_envs: int = 4096
+    num_envs: int = 512
+    # num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
@@ -715,6 +715,9 @@ class RobotEnvCfg(BaseRobotEnvCfg):
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
 
+        self.scene.terrain.terrain_generator.num_rows = 8  # terrain levels
+        self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
+
         # Restrict sideways/yaw commands on MGDP directional terrain types.
         linear_terrains = set(self.scene.terrain.terrain_generator.sub_terrains.keys()) - OMNIDIRECTIONAL_TERRAIN_TYPES
         terrain_names = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
@@ -730,6 +733,4 @@ class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 256
-        self.scene.terrain.terrain_generator.num_rows = 8  # terrain levels
-        self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

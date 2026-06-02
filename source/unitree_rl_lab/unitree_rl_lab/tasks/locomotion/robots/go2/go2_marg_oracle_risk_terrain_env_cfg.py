@@ -358,6 +358,14 @@ class EventCfg:
 
 # =========================== Command Space ===============================
 # =========================================================================
+# Exposed command interface for this training task:
+# all terrain columns use the same near-forward-only velocity command.
+FORWARD_ONLY_LIN_VEL_X = (0.1, 0.5)
+FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.0)
+FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
+FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
+
+
 @configclass
 class CommandsCfg:
     """Command specifications for the MDP."""
@@ -368,10 +376,14 @@ class CommandsCfg:
         rel_standing_envs=0.1,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.3, 0.5), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-1, 1)
+            lin_vel_x=FORWARD_ONLY_LIN_VEL_X,
+            lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
+            ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-1.0, 1.0), lin_vel_y=(-0.4, 0.4), ang_vel_z=(-1.0, 1.0)
+            lin_vel_x=FORWARD_ONLY_LIN_VEL_X_LIMIT,
+            lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
+            ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
         ),
     )
 
@@ -403,8 +415,6 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
 
-    proprio_obs: ProprioObsCfg = ProprioObsCfg()
-
     @configclass
     class ProprioHistoryObsCfg(ProprioObsCfg):
         """5(+1)-step proprio history, flattened to 270D."""
@@ -414,8 +424,6 @@ class ObservationsCfg:
             self.concatenate_terms = True
             self.history_length = 5 + 1  # include current step
             self.flatten_history_dim = True
-
-    proprio_history_obs: ProprioHistoryObsCfg = ProprioHistoryObsCfg()
 
     @configclass
     class TerrainMapObsCfg(ObsGroup):
@@ -431,8 +439,6 @@ class ObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
-
-    terrain_map_obs: TerrainMapObsCfg = TerrainMapObsCfg()
 
     @configclass
     class PrivilegedObsCfg(ObsGroup):
@@ -469,9 +475,6 @@ class ObservationsCfg:
     @configclass
     class PolicyHistoryObsCfg(ProprioHistoryObsCfg):
         """Current policy history obs, same as proprio history obs."""
-
-        def __post_init__(self):
-            super().__post_init__()
 
     policy_history_obs: PolicyHistoryObsCfg = PolicyHistoryObsCfg()
 
@@ -632,7 +635,14 @@ class CurriculumCfg:
     # Curriculum for terrain level progression based on robot performance
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
     # Curriculum for velocity command range progression
-    lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
+    lin_vel_cmd_levels = CurrTerm(
+        func=mdp.lin_vel_cmd_levels,
+        params={
+            "reward_term_name": "a_track_lin_vel_xy",
+            "lin_vel_x_delta": (0.1, 0.1),
+            "lin_vel_y_delta": (0.0, 0.0),
+        },
+    )
 
 
 
@@ -682,10 +692,6 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 
         self.scene.terrain.terrain_generator.num_rows = 10  # terrain levels
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
-
-        # Restrict sideways/yaw commands on all MGDP terrain types.
-        terrain_names = self.scene.terrain.terrain_generator.sub_terrains.keys()
-        self.commands.base_velocity.restricted_terrain_types = tuple(sorted(terrain_names))
 
 
 @configclass

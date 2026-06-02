@@ -4,6 +4,7 @@ import torch
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -21,8 +22,6 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
-
-from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
 
 
 def _active_subterrain_count(terrain_generator_cfg) -> int:
@@ -357,6 +356,26 @@ class EventCfg:
     )
 
 
+# =========================== Command Space ===============================
+# =========================================================================
+@configclass
+class CommandsCfg:
+    """Command specifications for the MDP."""
+
+    base_velocity = mdp.UniformLevelVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(10.0, 10.0),
+        rel_standing_envs=0.1,
+        debug_vis=True,
+        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(-0.3, 0.5), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-1, 1)
+        ),
+        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(-1.0, 1.0), lin_vel_y=(-0.4, 0.4), ang_vel_z=(-1.0, 1.0)
+        ),
+    )
+
+
 
 
 # =========================== Observation Space ===========================
@@ -540,16 +559,16 @@ class RewardsCfg:
         weight=-0.5,
     )
     
-    track_lin_vel_xy = RewTerm(
+    a_track_lin_vel_xy = RewTerm(
         func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
-    track_ang_vel_z = RewTerm(
+    a_track_ang_vel_z = RewTerm(
         func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
 
     # -- smoothness
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    base_linear_velocity_z = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    base_angular_velocity_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
@@ -621,11 +640,12 @@ class CurriculumCfg:
 # =========================== Task & Play Config ==========================
 # =========================================================================
 @configclass
-class RobotEnvCfg(BaseRobotEnvCfg):
+class RobotEnvCfg(ManagerBasedRLEnvCfg):
     """Go2 Marg-Oracle velocity task config."""
 
     scene: RobotSceneCfg = RobotSceneCfg()
     actions: ActionsCfg = ActionsCfg()
+    commands: CommandsCfg = CommandsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -634,10 +654,23 @@ class RobotEnvCfg(BaseRobotEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
-        super().__post_init__()
+        # general settings
+        self.decimation = 4
+        self.episode_length_s = 20.0
+        # simulation settings
+        self.sim.dt = 0.005
+        self.sim.render_interval = self.decimation
+        self.sim.physics_material = self.scene.terrain.physics_material
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         # MGDP heightfield terrains create denser contact patches than the box-based
         # risk terrains, so the default 2**26 collision stack can overflow on GPU.
         self.sim.physx.gpu_collision_stack_size = max(self.sim.physx.gpu_collision_stack_size, 2**27)
+
+        # update sensor update periods
+        # we tick all the sensors based on the smallest update period (physics update period)
+        self.scene.contact_forces.update_period = self.sim.dt
+        self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:

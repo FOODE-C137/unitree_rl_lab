@@ -647,7 +647,7 @@ class RobotEnvCfg(BaseRobotEnvCfg):
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
 
-        self.scene.terrain.terrain_generator.num_rows = 16  # terrain levels
+        self.scene.terrain.terrain_generator.num_rows = 10  # terrain levels
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
 
         # Restrict sideways/yaw commands on all MGDP terrain types.

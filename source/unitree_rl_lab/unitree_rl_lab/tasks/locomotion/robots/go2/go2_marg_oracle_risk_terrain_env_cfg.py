@@ -197,6 +197,32 @@ def randomize_motor_strength(
             )
 
 
+def apply_external_force_torque_xy(
+    env,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+    force_xy_range: tuple[float, float],
+    torque_z_range: tuple[float, float] = (0.0, 0.0),
+):
+    """Apply a persistent horizontal disturbance force and yaw torque to selected bodies."""
+
+    asset = env.scene[asset_cfg.name]
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
+
+    num_bodies = len(asset_cfg.body_ids) if isinstance(asset_cfg.body_ids, list) else asset.num_bodies
+    forces = torch.zeros((len(env_ids), num_bodies, 3), device=asset.device)
+    torques = torch.zeros_like(forces)
+
+    forces[..., :2] = math_utils.sample_uniform(
+        force_xy_range[0], force_xy_range[1], (len(env_ids), num_bodies, 2), asset.device
+    )
+    torques[..., 2] = math_utils.sample_uniform(
+        torque_z_range[0], torque_z_range[1], (len(env_ids), num_bodies), asset.device
+    )
+    asset.set_external_force_and_torque(forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids)
+
+
 def reset_base_with_terrain_orientation(
     env,
     env_ids: torch.Tensor | None,
@@ -284,6 +310,7 @@ class EventCfg:
             "dynamic_friction_range": (0.2, 1.25),
             "restitution_range": (0.0, 0.15),
             "num_buckets": 64,
+            "make_consistent": True,
         },
     )
 
@@ -292,7 +319,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (0.0, 3.0),
+            "mass_distribution_params": (0.0, 1.5),
             "operation": "add",
         },
     )
@@ -313,7 +340,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (0.0, 0.0)},
+            "com_range": {"x": (-0.03, 0.03), "y": (-0.015, 0.015), "z": (-0.01, 0.02)},
         },
     )
 
@@ -328,12 +355,12 @@ class EventCfg:
 
     # reset
     base_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
+        func=apply_external_force_torque_xy,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "force_range": (0.0, 0.0),
-            "torque_range": (-0.0, 0.0),
+            "force_xy_range": (-8.0, 8.0),
+            "torque_z_range": (-1.0, 1.0),
         },
     )
 

@@ -95,6 +95,45 @@ def _import_class(import_path: str):
     return getattr(module, class_name)
 
 
+def _get_obs_term_slice(env, group_name: str, term_name: str) -> slice | None:
+    """Return the flattened slice for an observation term in a concatenated group."""
+    obs_manager = env.unwrapped.observation_manager
+    term_names = obs_manager.active_terms.get(group_name)
+    term_dims = obs_manager.group_obs_term_dim.get(group_name)
+    if term_names is None or term_dims is None:
+        return None
+
+    start = 0
+    for name, dims in zip(term_names, term_dims):
+        width = math.prod(dims)
+        if name == term_name:
+            return slice(start, start + width)
+        start += width
+    return None
+
+
+def _override_command_observation(env, obs_dict: dict[str, torch.Tensor], group_name: str, command: torch.Tensor):
+    """Override velocity_commands in an already-computed observation group."""
+    if group_name not in obs_dict:
+        return
+
+    command_slice = _get_obs_term_slice(env, group_name, "velocity_commands")
+    if command_slice is None:
+        return
+
+    obs = obs_dict[group_name]
+    width = command_slice.stop - command_slice.start
+    command_value = command.to(obs.device)
+    if width != command_value.numel():
+        if width % command_value.numel() != 0:
+            raise ValueError(
+                f"Cannot broadcast command with shape {tuple(command_value.shape)} into "
+                f"{group_name}.velocity_commands slice of width {width}."
+            )
+        command_value = command_value.repeat(width // command_value.numel())
+    obs[:, command_slice] = command_value
+
+
 def _override_base_velocity_command(env, obs_dict: dict[str, torch.Tensor] | None, command: torch.Tensor | None = None):
     """Override the velocity command for keyboard teleoperation."""
     if command is None:
@@ -112,14 +151,65 @@ def _override_base_velocity_command(env, obs_dict: dict[str, torch.Tensor] | Non
     if obs_dict is None:
         return
     for key in ("policy", "policy_raw_obs"):
-        if key in obs_dict:
-            obs_dict[key][:, 6:9] = command.to(obs_dict[key].device)
-    if "policy_history_obs" in obs_dict:
-        # IsaacLab flattens history per observation term before concatenating terms:
-        # base_ang_vel[5*3], projected_gravity[5*3], velocity_commands[5*3], ...
-        history = obs_dict["policy_history_obs"]
-        command_history = command.to(history.device).repeat(5)
-        history[:, 30:45] = command_history
+        _override_command_observation(env, obs_dict, key, command)
+    _override_command_observation(env, obs_dict, "policy_history_obs", command)
+
+
+def _get_terrain_column_names(env) -> list[str]:
+    """Return generated terrain names in column order."""
+    terrain = env.unwrapped.scene.terrain
+    if terrain is None or terrain.terrain_origins is None:
+        return []
+
+    generator_cfg = getattr(terrain.cfg, "terrain_generator", None)
+    if generator_cfg is None or not getattr(generator_cfg, "sub_terrains", None):
+        return []
+
+    items = [
+        (name, float(sub_cfg.proportion))
+        for name, sub_cfg in generator_cfg.sub_terrains.items()
+        if float(sub_cfg.proportion) > 0.0
+    ]
+    if not items:
+        return []
+
+    num_cols = int(terrain.terrain_origins.shape[1])
+    total = sum(proportion for _, proportion in items)
+    cumulative = []
+    running = 0.0
+    for name, proportion in items:
+        running += proportion / total
+        cumulative.append((name, running))
+
+    column_names = []
+    for index in range(num_cols):
+        column_position = index / num_cols + 0.001
+        selected_name = cumulative[-1][0]
+        for name, threshold in cumulative:
+            if column_position < threshold:
+                selected_name = name
+                break
+        column_names.append(selected_name)
+    return column_names
+
+
+def _select_terrain_column(env, column: int):
+    """Move env 0 to a specific generated terrain column before reset."""
+    terrain = env.unwrapped.scene.terrain
+    if terrain is None or terrain.terrain_origins is None:
+        raise RuntimeError("Keyboard terrain selection requires generated terrain origins.")
+
+    if column < 0 or column >= terrain.terrain_origins.shape[1]:
+        raise ValueError(f"Terrain column {column} is out of range.")
+
+    env_id = torch.tensor([0], dtype=torch.long, device=terrain.device)
+    terrain.terrain_types[env_id] = column
+    terrain.terrain_levels[env_id] = torch.clamp(
+        terrain.terrain_levels[env_id],
+        min=0,
+        max=terrain.terrain_origins.shape[0] - 1,
+    )
+    terrain.env_origins[env_id] = terrain.terrain_origins[terrain.terrain_levels[env_id], terrain.terrain_types[env_id]]
 
 
 def _update_follow_camera(env):
@@ -249,10 +339,18 @@ def main():
     keyboard = None
     filtered_keyboard_command = None
     reset_requested = False
+    pending_terrain_column = None
+    terrain_column_names = []
 
     def request_reset():
         nonlocal reset_requested
         reset_requested = True
+
+    def request_terrain_reset(column: int):
+        nonlocal pending_terrain_column, reset_requested
+        pending_terrain_column = column
+        reset_requested = True
+        print(f"[INFO]: Requested terrain {column + 1}: {terrain_column_names[column]}")
 
     if args_cli.keyboard:
         keyboard = Se2Keyboard(
@@ -264,8 +362,19 @@ def main():
             )
         )
         keyboard.add_callback("ENTER", request_reset)
+        terrain_column_names = _get_terrain_column_names(env)
+        for column, _ in enumerate(terrain_column_names[:9]):
+            callback = lambda column=column: request_terrain_reset(column)
+            keyboard.add_callback(f"KEY_{column + 1}", callback)
+            keyboard.add_callback(str(column + 1), callback)
         print(keyboard)
         print("\tReset robot pose: ENTER")
+        if terrain_column_names:
+            print("\tSelect terrain and respawn:")
+            for column, terrain_name in enumerate(terrain_column_names[:9]):
+                print(f"\t  {column + 1}: {terrain_name}")
+        else:
+            print("\tSelect terrain and respawn: unavailable for this terrain config")
         filtered_keyboard_command = torch.zeros(3, device=env.unwrapped.device)
 
     # reset environment
@@ -281,10 +390,24 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             if reset_requested:
+                selected_terrain_name = None
+                if pending_terrain_column is not None:
+                    _select_terrain_column(env, pending_terrain_column)
+                    selected_terrain_name = terrain_column_names[pending_terrain_column]
                 obs, extras = env.reset()
                 obs_dict = extras["observations"]
+                if keyboard is not None:
+                    keyboard.reset()
                 if filtered_keyboard_command is not None:
                     filtered_keyboard_command.zero_()
+                if selected_terrain_name is not None:
+                    terrain = env.unwrapped.scene.terrain
+                    terrain_level = int(terrain.terrain_levels[0].item())
+                    print(
+                        f"[INFO]: Respawned on terrain {pending_terrain_column + 1}: "
+                        f"{selected_terrain_name} (level {terrain_level})"
+                    )
+                    pending_terrain_column = None
                 reset_requested = False
 
             command = None

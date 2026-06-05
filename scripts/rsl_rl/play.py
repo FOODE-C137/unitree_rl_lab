@@ -95,47 +95,8 @@ def _import_class(import_path: str):
     return getattr(module, class_name)
 
 
-def _get_obs_term_slice(env, group_name: str, term_name: str) -> slice | None:
-    """Return the flattened slice for an observation term in a concatenated group."""
-    obs_manager = env.unwrapped.observation_manager
-    term_names = obs_manager.active_terms.get(group_name)
-    term_dims = obs_manager.group_obs_term_dim.get(group_name)
-    if term_names is None or term_dims is None:
-        return None
-
-    start = 0
-    for name, dims in zip(term_names, term_dims):
-        width = math.prod(dims)
-        if name == term_name:
-            return slice(start, start + width)
-        start += width
-    return None
-
-
-def _override_command_observation(env, obs_dict: dict[str, torch.Tensor], group_name: str, command: torch.Tensor):
-    """Override velocity_commands in an already-computed observation group."""
-    if group_name not in obs_dict:
-        return
-
-    command_slice = _get_obs_term_slice(env, group_name, "velocity_commands")
-    if command_slice is None:
-        return
-
-    obs = obs_dict[group_name]
-    width = command_slice.stop - command_slice.start
-    command_value = command.to(obs.device)
-    if width != command_value.numel():
-        if width % command_value.numel() != 0:
-            raise ValueError(
-                f"Cannot broadcast command with shape {tuple(command_value.shape)} into "
-                f"{group_name}.velocity_commands slice of width {width}."
-            )
-        command_value = command_value.repeat(width // command_value.numel())
-    obs[:, command_slice] = command_value
-
-
-def _override_base_velocity_command(env, obs_dict: dict[str, torch.Tensor] | None, command: torch.Tensor | None = None):
-    """Override the velocity command for keyboard teleoperation."""
+def _set_base_velocity_command(env, command: torch.Tensor | None = None):
+    """Set the command source used by generated_commands observations."""
     if command is None:
         return
 
@@ -147,12 +108,14 @@ def _override_base_velocity_command(env, obs_dict: dict[str, torch.Tensor] | Non
         command_term.is_standing_env[:] = is_standing
     if hasattr(command_term, "is_heading_env"):
         command_term.is_heading_env[:] = False
+    if hasattr(command_term, "time_left"):
+        command_term.time_left[:] = command_term.cfg.resampling_time_range[1]
 
-    if obs_dict is None:
-        return
-    for key in ("policy", "policy_raw_obs"):
-        _override_command_observation(env, obs_dict, key, command)
-    _override_command_observation(env, obs_dict, "policy_history_obs", command)
+
+def _compute_observations(env, update_history: bool = False) -> tuple[torch.Tensor, dict]:
+    """Compute observations from the current command source."""
+    obs_dict = env.unwrapped.observation_manager.compute(update_history=update_history)
+    return obs_dict["policy"], {"observations": obs_dict}
 
 
 def _get_terrain_column_names(env) -> list[str]:
@@ -383,6 +346,11 @@ def main():
     if version("rsl-rl-lib").startswith("2.3."):
         obs, extras = env.get_observations()
         obs_dict = extras["observations"]
+    if keyboard is not None:
+        _set_base_velocity_command(env, filtered_keyboard_command)
+        env.unwrapped.observation_manager.reset()
+        obs, extras = _compute_observations(env, update_history=True)
+        obs_dict = extras["observations"]
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
@@ -400,6 +368,10 @@ def main():
                     keyboard.reset()
                 if filtered_keyboard_command is not None:
                     filtered_keyboard_command.zero_()
+                    _set_base_velocity_command(env, filtered_keyboard_command)
+                    env.unwrapped.observation_manager.reset()
+                    obs, extras = _compute_observations(env, update_history=True)
+                    obs_dict = extras["observations"]
                 if selected_terrain_name is not None:
                     terrain = env.unwrapped.scene.terrain
                     terrain_level = int(terrain.terrain_levels[0].item())
@@ -423,13 +395,15 @@ def main():
                 if torch.linalg.norm(raw_command) < 1.0e-4 and torch.linalg.norm(command) < 1.0e-3:
                     filtered_keyboard_command.zero_()
                     command = filtered_keyboard_command
-            _override_base_velocity_command(env, obs_dict, command)
+                _set_base_velocity_command(env, command)
+                obs, extras = _compute_observations(env, update_history=False)
+                obs_dict = extras["observations"]
             _update_follow_camera(env)
             # agent stepping
             actions = policy(obs_dict if using_custom_runner else obs)
             # env stepping
             obs, _, _, infos = env.step(actions)
-            if using_custom_runner:
+            if using_custom_runner or keyboard is not None:
                 obs_dict = infos["observations"]
         if args_cli.video:
             timestep += 1

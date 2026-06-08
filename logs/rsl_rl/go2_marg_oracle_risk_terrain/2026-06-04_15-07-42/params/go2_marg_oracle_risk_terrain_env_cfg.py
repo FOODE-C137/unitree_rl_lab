@@ -369,7 +369,7 @@ class EventCfg:
 # Exposed command interface for this training task:
 # all terrain columns use the same near-forward-only velocity command.
 FORWARD_ONLY_LIN_VEL_X = (0.1, 0.5)
-FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.5)
+FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.0)
 FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
 FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
 

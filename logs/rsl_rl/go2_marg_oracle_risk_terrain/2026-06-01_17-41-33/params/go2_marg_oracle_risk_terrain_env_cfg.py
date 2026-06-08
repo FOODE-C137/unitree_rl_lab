@@ -1,11 +1,9 @@
 import math
-from pathlib import Path
 
 import torch
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -24,10 +22,7 @@ from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
-
-GO2_MODIFIED_URDF_PATH = (
-    Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified/urdf/go2_description.urdf"
-)
+from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
 
 
 def _active_subterrain_count(terrain_generator_cfg) -> int:
@@ -35,7 +30,6 @@ def _active_subterrain_count(terrain_generator_cfg) -> int:
 
 
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
-    spawn=ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH)),
     actuators={
         "GO2HV": ROBOT_CFG.actuators["GO2HV"].replace(
             # DelayedPDActuator samples an integer number of physics steps.
@@ -284,7 +278,6 @@ class EventCfg:
             "dynamic_friction_range": (0.2, 1.25),
             "restitution_range": (0.0, 0.15),
             "num_buckets": 64,
-            "make_consistent": True,
         },
     )
 
@@ -293,7 +286,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (0.0, 1.5),
+            "mass_distribution_params": (0.0, 3.0),
             "operation": "add",
         },
     )
@@ -314,7 +307,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {"x": (-0.03, 0.03), "y": (-0.015, 0.015), "z": (-0.01, 0.02)},
+            "com_range": {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (0.0, 0.0)},
         },
     )
 
@@ -364,38 +357,6 @@ class EventCfg:
     )
 
 
-# =========================== Command Space ===============================
-# =========================================================================
-# Exposed command interface for this training task:
-# all terrain columns use the same near-forward-only velocity command.
-FORWARD_ONLY_LIN_VEL_X = (0.1, 0.5)
-FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.5)
-FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
-FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
-
-
-@configclass
-class CommandsCfg:
-    """Command specifications for the MDP."""
-
-    base_velocity = mdp.UniformLevelVelocityCommandCfg(
-        asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.1,
-        debug_vis=True,
-        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=FORWARD_ONLY_LIN_VEL_X,
-            lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
-            ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
-        ),
-        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=FORWARD_ONLY_LIN_VEL_X_LIMIT,
-            lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
-            ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
-        ),
-    )
-
-
 
 
 # =========================== Observation Space ===========================
@@ -423,6 +384,8 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
 
+    proprio_obs: ProprioObsCfg = ProprioObsCfg()
+
     @configclass
     class ProprioHistoryObsCfg(ProprioObsCfg):
         """5(+1)-step proprio history, flattened to 270D."""
@@ -432,6 +395,8 @@ class ObservationsCfg:
             self.concatenate_terms = True
             self.history_length = 5 + 1  # include current step
             self.flatten_history_dim = True
+
+    proprio_history_obs: ProprioHistoryObsCfg = ProprioHistoryObsCfg()
 
     @configclass
     class TerrainMapObsCfg(ObsGroup):
@@ -447,6 +412,8 @@ class ObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
+
+    terrain_map_obs: TerrainMapObsCfg = TerrainMapObsCfg()
 
     @configclass
     class PrivilegedObsCfg(ObsGroup):
@@ -483,6 +450,9 @@ class ObservationsCfg:
     @configclass
     class PolicyHistoryObsCfg(ProprioHistoryObsCfg):
         """Current policy history obs, same as proprio history obs."""
+
+        def __post_init__(self):
+            super().__post_init__()
 
     policy_history_obs: PolicyHistoryObsCfg = PolicyHistoryObsCfg()
 
@@ -643,14 +613,7 @@ class CurriculumCfg:
     # Curriculum for terrain level progression based on robot performance
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
     # Curriculum for velocity command range progression
-    lin_vel_cmd_levels = CurrTerm(
-        func=mdp.lin_vel_cmd_levels,
-        params={
-            "reward_term_name": "a_track_lin_vel_xy",
-            "lin_vel_x_delta": (0.1, 0.1),
-            "lin_vel_y_delta": (0.0, 0.0),
-        },
-    )
+    lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
 
@@ -658,12 +621,11 @@ class CurriculumCfg:
 # =========================== Task & Play Config ==========================
 # =========================================================================
 @configclass
-class RobotEnvCfg(ManagerBasedRLEnvCfg):
+class RobotEnvCfg(BaseRobotEnvCfg):
     """Go2 Marg-Oracle velocity task config."""
 
     scene: RobotSceneCfg = RobotSceneCfg()
     actions: ActionsCfg = ActionsCfg()
-    commands: CommandsCfg = CommandsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -672,23 +634,10 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
-        # general settings
-        self.decimation = 4
-        self.episode_length_s = 20.0
-        # simulation settings
-        self.sim.dt = 0.005
-        self.sim.render_interval = self.decimation
-        self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        super().__post_init__()
         # MGDP heightfield terrains create denser contact patches than the box-based
         # risk terrains, so the default 2**26 collision stack can overflow on GPU.
         self.sim.physx.gpu_collision_stack_size = max(self.sim.physx.gpu_collision_stack_size, 2**27)
-
-        # update sensor update periods
-        # we tick all the sensors based on the smallest update period (physics update period)
-        self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.height_scanner.update_period = self.decimation * self.sim.dt
-
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
@@ -700,6 +649,10 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 
         self.scene.terrain.terrain_generator.num_rows = 10  # terrain levels
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
+
+        # Restrict sideways/yaw commands on all MGDP terrain types.
+        terrain_names = self.scene.terrain.terrain_generator.sub_terrains.keys()
+        self.commands.base_velocity.restricted_terrain_types = tuple(sorted(terrain_names))
 
 
 @configclass

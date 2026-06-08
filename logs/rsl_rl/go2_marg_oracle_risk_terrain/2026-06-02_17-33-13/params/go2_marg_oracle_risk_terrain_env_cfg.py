@@ -1,5 +1,4 @@
 import math
-from pathlib import Path
 
 import torch
 import isaaclab.sim as sim_utils
@@ -25,17 +24,11 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
 
-GO2_MODIFIED_URDF_PATH = (
-    Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified/urdf/go2_description.urdf"
-)
-
-
 def _active_subterrain_count(terrain_generator_cfg) -> int:
     return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
 
 
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
-    spawn=ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH)),
     actuators={
         "GO2HV": ROBOT_CFG.actuators["GO2HV"].replace(
             # DelayedPDActuator samples an integer number of physics steps.
@@ -284,7 +277,6 @@ class EventCfg:
             "dynamic_friction_range": (0.2, 1.25),
             "restitution_range": (0.0, 0.15),
             "num_buckets": 64,
-            "make_consistent": True,
         },
     )
 
@@ -293,7 +285,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (0.0, 1.5),
+            "mass_distribution_params": (0.0, 3.0),
             "operation": "add",
         },
     )
@@ -314,7 +306,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {"x": (-0.03, 0.03), "y": (-0.015, 0.015), "z": (-0.01, 0.02)},
+            "com_range": {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (0.0, 0.0)},
         },
     )
 
@@ -369,7 +361,7 @@ class EventCfg:
 # Exposed command interface for this training task:
 # all terrain columns use the same near-forward-only velocity command.
 FORWARD_ONLY_LIN_VEL_X = (0.1, 0.5)
-FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.5)
+FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.0)
 FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
 FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
 

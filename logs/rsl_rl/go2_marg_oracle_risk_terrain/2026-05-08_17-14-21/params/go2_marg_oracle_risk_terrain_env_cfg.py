@@ -1,11 +1,11 @@
 import math
-from pathlib import Path
 
 import torch
+import numpy as np
 import isaaclab.sim as sim_utils
+import isaaclab.terrains as terrain_gen
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -22,20 +22,13 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_GO2_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
-from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
+from .marg_risk_terrain import MARG_RISK_TERRAIN_GENERATOR_CFG
 
-
-GO2_MODIFIED_URDF_PATH = (
-    Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified/urdf/go2_description.urdf"
-)
-
-
-def _active_subterrain_count(terrain_generator_cfg) -> int:
-    return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
+from .velocity_env_cfg import RobotEnvCfg as BaseRobotEnvCfg
+from .velocity_env_cfg import TerminationsCfg as BaseTerminationsCfg
 
 
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
-    spawn=ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH)),
     actuators={
         "GO2HV": ROBOT_CFG.actuators["GO2HV"].replace(
             # DelayedPDActuator samples an integer number of physics steps.
@@ -47,19 +40,27 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 )
 
 
+# =========================== Terrain Config ===========================
+# ======================================================================
+# marg_risk_terrain.py
+# The terrain generator samples beam widths and gap sizes from uniform distributions. 
+
+
+
 # =========================== Scene Config ===========================
 # ====================================================================
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
     """Scene config for the Go2 Marg-Oracle velocity task."""
-
+    
+    # num_envs: int = 512
     num_envs: int = 4096
     env_spacing: float = 2.5
 
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
-        terrain_generator=MGDP_TERRAIN_GENERATOR_CFG,
+        terrain_generator=MARG_RISK_TERRAIN_GENERATOR_CFG,
         max_init_terrain_level=1,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -195,6 +196,14 @@ def randomize_motor_strength(
             actuator.effort_limit[env_ids[:, None], local_ids] = (
                 actuator._default_effort_limit[env_ids[:, None], local_ids] * selected_strength
             )
+    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
+    sky_light = AssetBaseCfg(
+        prim_path="/World/skyLight",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=750.0,
+            texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
+        ),
+    )
 
 
 def reset_base_with_terrain_orientation(
@@ -202,27 +211,60 @@ def reset_base_with_terrain_orientation(
     env_ids: torch.Tensor | None,
     asset_cfg: SceneEntityCfg,
 ):
-    """Reset base position and orientation for directional MGDP terrains.
-
-    The robot's initial yaw is aligned to +x direction with ±5° deviation.
-    Position offset is ±10cm from spawn center in xy plane.
+    """Reset base position and orientation based on terrain type.
+    
+    For linear terrain types (stones_2rows, stones_balance, beams_balance, air_beams_balance),
+    the robot's initial yaw is set to either +x or -x direction.
+    For other terrain types, yaw is randomized.
     """
+    # Get the asset and terrain information
     asset = env.scene[asset_cfg.name]
-
+    terrain = env.scene.terrain
+    
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=asset.device)
     else:
         env_ids = env_ids.to(asset.device)
+    
+    # Define terrain types that need fixed orientation
+    LINEAR_TERRAIN_TYPES = {"stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"}
+    
+    # Get terrain column indices (which terrain column each env is on)
+    terrain_types = terrain.terrain_types[env_ids]
+    terrain_names = list(MARG_RISK_TERRAIN_GENERATOR_CFG.sub_terrains.keys())
 
+    # In curriculum terrains, terrain_types stores column index, not direct sub-terrain index.
+    proportions = np.array([sub_cfg.proportion for sub_cfg in MARG_RISK_TERRAIN_GENERATOR_CFG.sub_terrains.values()])
+    proportions = proportions / np.sum(proportions)
+    cumulative = np.cumsum(proportions)
+    
+    # Initialize from default root state to keep base height and nominal dynamics sane.
     num_envs = len(env_ids)
     root_states = asset.data.default_root_state[env_ids].clone()
     pos_offsets = torch.zeros((num_envs, 3), device=asset.device)
     velocities = root_states[:, 7:13].clone()
+    yaws = torch.empty((num_envs,), device=asset.device)
+    
+    # Randomize position in x-y within +-0.2m
+    pos_offsets[:, 0] = torch.rand(num_envs, device=asset.device) * 0.4 - 0.2
+    pos_offsets[:, 1] = torch.rand(num_envs, device=asset.device) * 0.4 - 0.2
+    
+    # Set yaw based on terrain type
+    for i, _env_id in enumerate(env_ids):
+        terrain_col = int(terrain_types[i].item())
+        ratio = terrain_col / float(MARG_RISK_TERRAIN_GENERATOR_CFG.num_cols) + 0.001
+        sub_index = int(np.searchsorted(cumulative, ratio, side="left"))
 
-    angle_tolerance = 5.0 * math.pi / 180.0
-    yaws = torch.empty((num_envs,), device=asset.device).uniform_(-angle_tolerance, angle_tolerance)
-    pos_offsets[:, 0:2] = torch.empty((num_envs, 2), device=asset.device).uniform_(-0.1, 0.1)
+        if sub_index >= len(terrain_names):
+            sub_index = len(terrain_names) - 1
 
+        terrain_name = terrain_names[sub_index]
+        if terrain_name in LINEAR_TERRAIN_TYPES:
+            yaws[i] = 0.0
+        else:
+            yaws[i] = torch.rand(1, device=asset.device).item() * 2.0 * math.pi - math.pi
+
+    # Compose root pose: position in world frame + yaw-only orientation in quaternion.
     positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + pos_offsets
     orientations = math_utils.quat_from_euler_xyz(
         torch.zeros_like(yaws),
@@ -238,7 +280,7 @@ def reset_base_with_terrain_orientation(
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
-
+    
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_contact = DoneTerm(
         func=mdp.illegal_contact,
@@ -251,12 +293,12 @@ class TerminationsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "command_name": "base_velocity",
-            "duration": 1.0,
-            "distance_threshold": 1.50,
+            "duration": 10.0,
+            "distance_threshold": 0.10,
             "command_speed_threshold": 0.05,
         },
     )
-
+    
     feet_on_base_plane_linear = DoneTerm(
         func=mdp.terminate_feet_on_base_plane_selected_terrains,
         params={
@@ -284,7 +326,6 @@ class EventCfg:
             "dynamic_friction_range": (0.2, 1.25),
             "restitution_range": (0.0, 0.15),
             "num_buckets": 64,
-            "make_consistent": True,
         },
     )
 
@@ -293,7 +334,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (0.0, 1.5),
+            "mass_distribution_params": (0.0, 3.0),
             "operation": "add",
         },
     )
@@ -314,7 +355,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {"x": (-0.03, 0.03), "y": (-0.015, 0.015), "z": (-0.01, 0.02)},
+            "com_range": {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (0.0, 0.0)},
         },
     )
 
@@ -364,38 +405,6 @@ class EventCfg:
     )
 
 
-# =========================== Command Space ===============================
-# =========================================================================
-# Exposed command interface for this training task:
-# all terrain columns use the same near-forward-only velocity command.
-FORWARD_ONLY_LIN_VEL_X = (0.1, 0.5)
-FORWARD_ONLY_LIN_VEL_X_LIMIT = (0.4, 1.5)
-FORWARD_ONLY_LIN_VEL_Y = (-0.01, 0.01)
-FORWARD_ONLY_ANG_VEL_Z = (-0.01, 0.01)
-
-
-@configclass
-class CommandsCfg:
-    """Command specifications for the MDP."""
-
-    base_velocity = mdp.UniformLevelVelocityCommandCfg(
-        asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.1,
-        debug_vis=True,
-        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=FORWARD_ONLY_LIN_VEL_X,
-            lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
-            ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
-        ),
-        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=FORWARD_ONLY_LIN_VEL_X_LIMIT,
-            lin_vel_y=FORWARD_ONLY_LIN_VEL_Y,
-            ang_vel_z=FORWARD_ONLY_ANG_VEL_Z,
-        ),
-    )
-
-
 
 
 # =========================== Observation Space ===========================
@@ -423,6 +432,8 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
 
+    proprio_obs: ProprioObsCfg = ProprioObsCfg()
+
     @configclass
     class ProprioHistoryObsCfg(ProprioObsCfg):
         """5(+1)-step proprio history, flattened to 270D."""
@@ -432,6 +443,8 @@ class ObservationsCfg:
             self.concatenate_terms = True
             self.history_length = 5 + 1  # include current step
             self.flatten_history_dim = True
+
+    proprio_history_obs: ProprioHistoryObsCfg = ProprioHistoryObsCfg()
 
     @configclass
     class TerrainMapObsCfg(ObsGroup):
@@ -447,6 +460,8 @@ class ObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
+
+    terrain_map_obs: TerrainMapObsCfg = TerrainMapObsCfg()
 
     @configclass
     class PrivilegedObsCfg(ObsGroup):
@@ -539,8 +554,9 @@ class ObservationsCfg:
         """Compatibility group required by current RL wrappers."""
 
     critic: CriticCfg = CriticCfg()
-
-
+    
+    
+    
 # =========================== Action Space ================================
 # =========================================================================
 @configclass
@@ -565,11 +581,6 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # -- task
-    stand_still = RewTerm(
-        func=mdp.stand_still,
-        weight=-0.5,
-    )
-    
     a_track_lin_vel_xy = RewTerm(
         func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
@@ -627,6 +638,17 @@ class RewardsCfg:
             "command_name": "base_velocity",
         },
     )
+    
+    # feet_swing_alignment = RewTerm(
+    #     func=mdp.feet_swing_alignment,
+    #     weight=0.5,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
+    #         "command_name": "base_velocity",
+    #         "max_swing_time": 0.5,
+    #     },
+    # )
 
 
 
@@ -643,14 +665,7 @@ class CurriculumCfg:
     # Curriculum for terrain level progression based on robot performance
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
     # Curriculum for velocity command range progression
-    lin_vel_cmd_levels = CurrTerm(
-        func=mdp.lin_vel_cmd_levels,
-        params={
-            "reward_term_name": "a_track_lin_vel_xy",
-            "lin_vel_x_delta": (0.1, 0.1),
-            "lin_vel_y_delta": (0.0, 0.0),
-        },
-    )
+    lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
 
@@ -658,12 +673,11 @@ class CurriculumCfg:
 # =========================== Task & Play Config ==========================
 # =========================================================================
 @configclass
-class RobotEnvCfg(ManagerBasedRLEnvCfg):
+class RobotEnvCfg(BaseRobotEnvCfg):
     """Go2 Marg-Oracle velocity task config."""
 
     scene: RobotSceneCfg = RobotSceneCfg()
     actions: ActionsCfg = ActionsCfg()
-    commands: CommandsCfg = CommandsCfg()
     observations: ObservationsCfg = ObservationsCfg()
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -672,23 +686,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
-        # general settings
-        self.decimation = 4
-        self.episode_length_s = 20.0
-        # simulation settings
-        self.sim.dt = 0.005
-        self.sim.render_interval = self.decimation
-        self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
-        # MGDP heightfield terrains create denser contact patches than the box-based
-        # risk terrains, so the default 2**26 collision stack can overflow on GPU.
-        self.sim.physx.gpu_collision_stack_size = max(self.sim.physx.gpu_collision_stack_size, 2**27)
-
-        # update sensor update periods
-        # we tick all the sensors based on the smallest update period (physics update period)
-        self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.height_scanner.update_period = self.decimation * self.sim.dt
-
+        super().__post_init__()
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
@@ -698,8 +696,12 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
 
-        self.scene.terrain.terrain_generator.num_rows = 10  # terrain levels
-        self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
+        # Restrict sideways/yaw commands only on linear terrain types.
+        linear_terrains = {"stones_2rows", "stones_balance", "beams_balance", "air_beams_balance"}
+        terrain_names = set(self.scene.terrain.terrain_generator.sub_terrains.keys())
+
+        if terrain_names & linear_terrains:
+            self.commands.base_velocity.restricted_terrain_types = tuple(sorted(terrain_names & linear_terrains))
 
 
 @configclass
@@ -709,4 +711,6 @@ class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 256
+        self.scene.terrain.terrain_generator.num_rows = 8
+        self.scene.terrain.terrain_generator.num_cols = 6
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

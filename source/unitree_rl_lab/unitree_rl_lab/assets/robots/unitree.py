@@ -9,6 +9,7 @@ Reference: https://github.com/unitreerobotics/unitree_ros
 """
 
 import os
+import shutil
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
@@ -70,22 +71,25 @@ class UnitreeUrdfFileCfg(sim_utils.UrdfFileCfg):
         max_depenetration_velocity=1.0,
     )
 
-    def replace_asset(self, meshes_dir, urdf_path):
+    def replace_asset(self, meshes_dir, urdf_path, mesh_link_name="meshes"):
         """Replace the asset with a temporary copy to avoid modifying the original asset.
 
         When need to change the collisions, place the modified URDF file separately in this repository,
         and let `meshes_dir` be provided by `unitree_ros`.
         This function will auto construct a complete `robot_description` file structure in the `/tmp` directory.
-        Note: The mesh references inside the URDF should be in the same directory level as the URDF itself.
+        Note: The mesh references inside the URDF should be in a sibling directory of the temporary URDF.
         """
-        tmp_meshes_dir = "/tmp/IsaacLab/unitree_rl_lab/meshes"
-        if os.path.exists(tmp_meshes_dir):
-            os.remove(tmp_meshes_dir)
+        tmp_meshes_dir = os.path.join("/tmp/IsaacLab/unitree_rl_lab", mesh_link_name)
+        if os.path.lexists(tmp_meshes_dir):
+            if os.path.isdir(tmp_meshes_dir) and not os.path.islink(tmp_meshes_dir):
+                shutil.rmtree(tmp_meshes_dir)
+            else:
+                os.remove(tmp_meshes_dir)
         os.makedirs("/tmp/IsaacLab/unitree_rl_lab", exist_ok=True)
         os.symlink(meshes_dir, tmp_meshes_dir)
 
         self.asset_path = "/tmp/IsaacLab/unitree_rl_lab/robot.urdf"
-        if os.path.exists(self.asset_path):
+        if os.path.lexists(self.asset_path):
             os.remove(self.asset_path)
         os.symlink(urdf_path, self.asset_path)
 

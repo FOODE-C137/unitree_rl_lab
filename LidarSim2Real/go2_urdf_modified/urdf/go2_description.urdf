@@ -27,13 +27,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/base.dae" />
+          filename="dae/base.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0" />
@@ -64,7 +59,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/jetson_box.dae" />
+          filename="dae/jetson_box.dae" />
       </geometry>
     </visual>
     <collision>
@@ -149,7 +144,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/mid360withcase.stl"
+          filename="dae/mid360withcase.stl"
           scale="0.001 0.001 0.001" />
       </geometry>
       <material
@@ -164,7 +159,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/mid360withcase.stl"
+          filename="dae/mid360withcase.stl"
           scale="0.001 0.001 0.001" />
       </geometry>
     </collision>
@@ -272,13 +267,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/hip.dae" />
+          filename="dae/hip.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="1.5707963267948966 0 0" xyz="0 0.08 0" />
@@ -327,13 +317,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/thigh.dae" />
+          filename="dae/thigh.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 1.5707963267948966 0" xyz="0 0 -0.1065" />
@@ -382,13 +367,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/calf.dae" />
+          filename="dae/calf.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 -0.21 0" xyz="0.008 0 -0.06" />
@@ -481,13 +461,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/foot.dae" />
+          filename="dae/foot.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-0.002 0 0" />
@@ -531,13 +506,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="3.1415 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/hip.dae" />
+          filename="dae/hip.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="1.5707963267948966 0 0" xyz="0 -0.08 0" />
@@ -586,13 +556,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/thigh_mirror.dae" />
+          filename="dae/thigh_mirror.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 1.5707963267948966 0" xyz="0 0 -0.1065" />
@@ -641,13 +606,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/calf_mirror.dae" />
+          filename="dae/calf_mirror.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 -0.2 0" xyz="0.01 0 -0.06" />
@@ -740,13 +700,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/foot.dae" />
+          filename="dae/foot.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-0.002 0 0" />
@@ -790,13 +745,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 3.1415 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/hip.dae" />
+          filename="dae/hip.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="1.5707963267948966 0 0" xyz="0 0.08 0" />
@@ -845,13 +795,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/thigh.dae" />
+          filename="dae/thigh.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 1.5707963267948966 0" xyz="0 0 -0.1065" />
@@ -900,13 +845,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/calf.dae" />
+          filename="dae/calf.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 -0.2 0" xyz="0.01 0 -0.06" />
@@ -999,13 +939,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/foot.dae" />
+          filename="dae/foot.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-0.002 0 0" />
@@ -1049,13 +984,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="3.1415 3.1415 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/hip.dae" />
+          filename="dae/hip.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="1.5707963267948966 0 0" xyz="0 -0.08 0" />
@@ -1104,13 +1034,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/thigh_mirror.dae" />
+          filename="dae/thigh_mirror.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 1.5707963267948966 0" xyz="0 0 -0.1065" />
@@ -1159,13 +1084,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/calf_mirror.dae" />
+          filename="dae/calf_mirror.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 -0.2 0" xyz="0.01 0 -0.06" />
@@ -1258,13 +1178,8 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://go2_description_ros2/dae/foot.dae" />
+          filename="dae/foot.dae" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-0.002 0 0" />

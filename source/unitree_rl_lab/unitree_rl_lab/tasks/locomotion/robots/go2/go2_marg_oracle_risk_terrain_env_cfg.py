@@ -25,17 +25,24 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
 
-GO2_MODIFIED_URDF_PATH = (
-    Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified/urdf/go2_description.urdf"
-)
+GO2_MODIFIED_DESCRIPTION_DIR = Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified"
+GO2_MODIFIED_URDF_PATH = GO2_MODIFIED_DESCRIPTION_DIR / "urdf/go2_description.urdf"
+GO2_MODIFIED_DAE_DIR = GO2_MODIFIED_DESCRIPTION_DIR / "dae"
 
 
 def _active_subterrain_count(terrain_generator_cfg) -> int:
     return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
 
 
+GO2_MARG_ORACLE_SPAWN_CFG = ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH))
+GO2_MARG_ORACLE_SPAWN_CFG.replace_asset(
+    meshes_dir=str(GO2_MODIFIED_DAE_DIR),
+    urdf_path=str(GO2_MODIFIED_URDF_PATH),
+    mesh_link_name="dae",
+)
+
 GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
-    spawn=ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH)),
+    spawn=GO2_MARG_ORACLE_SPAWN_CFG,
     actuators={
         "GO2HV": ROBOT_CFG.actuators["GO2HV"].replace(
             # DelayedPDActuator samples an integer number of physics steps.
@@ -51,7 +58,7 @@ GO2_MARG_ORACLE_ROBOT_CFG = ROBOT_CFG.replace(
 # ====================================================================
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
-    """Scene config for the Go2 Marg-Oracle velocity task."""
+    """Scene config for the Go2 Marg-Oracle Risk Terrain task."""
 
     num_envs: int = 4096
     env_spacing: float = 2.5

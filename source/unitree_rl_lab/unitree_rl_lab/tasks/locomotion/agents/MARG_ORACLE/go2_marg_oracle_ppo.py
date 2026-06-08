@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from isaaclab_rl.rsl_rl.symmetry_cfg import RslRlSymmetryCfg
+from unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_rsl_rl_ppo_cfg import compute_symmetric_states_go2_marg_oracle
+
 from .go2_marg_oracle_rollout_storage import Go2MargOracleRolloutStorage
 
 
@@ -40,7 +43,12 @@ class Go2MargOraclePPO:
         estimator_loss_coef=1.0,
         velocity_loss_coef=1.0,
         contact_loss_coef=1.0,
-        symmetry_cfg=None,
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True,
+            mirror_loss_coeff=0.1,
+            use_mirror_loss=True,
+            data_augmentation_func=compute_symmetric_states_go2_marg_oracle,
+        ),
         **kwargs,
     ):
         self.device = device

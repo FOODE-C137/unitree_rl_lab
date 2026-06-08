@@ -4,7 +4,15 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from isaaclab.utils import configclass
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlSymmetryCfg
+
+
+def compute_symmetric_states_go2_marg_oracle(env, obs, actions):
+    from unitree_rl_lab.tasks.locomotion.robots.go2.go2_marg_oracle_risk_terrain_env_cfg import (
+        compute_symmetric_states_go2_marg_oracle as data_augmentation_func,
+    )
+
+    return data_augmentation_func(env, obs, actions)
 
 
 @configclass
@@ -92,4 +100,23 @@ class Go2MargOracleRiskTerrainPPORunnerCfg(Go2MargOraclePPORunnerCfg):
     """PPO runner config for Unitree-Go2-MARG-Oracle-Risk-Terrain task."""
 
     task_type = "risk_terrain"
-
+    algorithm = Go2MargOraclePPOAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.01,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True,
+            mirror_loss_coeff=0.0,
+            use_mirror_loss=True,
+            data_augmentation_func=compute_symmetric_states_go2_marg_oracle,
+        ),
+    )

@@ -40,6 +40,7 @@ class Go2MargOraclePPO:
         estimator_loss_coef=1.0,
         velocity_loss_coef=1.0,
         contact_loss_coef=1.0,
+        symmetry_cfg=None,
         **kwargs,
     ):
         self.device = device
@@ -64,6 +65,56 @@ class Go2MargOraclePPO:
         self.estimator_loss_coef = estimator_loss_coef
         self.velocity_loss_coef = velocity_loss_coef
         self.contact_loss_coef = contact_loss_coef
+        self.symmetry_cfg = symmetry_cfg
+        self.use_data_augmentation = self._get_symmetry_cfg_value("use_data_augmentation", False)
+        self.use_mirror_loss = self._get_symmetry_cfg_value("use_mirror_loss", False)
+        self.mirror_loss_coeff = self._get_symmetry_cfg_value("mirror_loss_coeff", 0.0)
+        self.data_augmentation_func = self._get_symmetry_cfg_value("data_augmentation_func", None)
+
+    def _get_symmetry_cfg_value(self, name: str, default):
+        if self.symmetry_cfg is None:
+            return default
+        if isinstance(self.symmetry_cfg, dict):
+            return self.symmetry_cfg.get(name, default)
+        return getattr(self.symmetry_cfg, name, default)
+
+    def _augment_batch_with_symmetry(
+        self,
+        obs_batch,
+        critic_obs_batch,
+        actions_batch,
+        target_values_batch,
+        advantages_batch,
+        returns_batch,
+        old_actions_log_prob_batch,
+    ):
+        if not self.use_data_augmentation or not callable(self.data_augmentation_func):
+            return (
+                obs_batch,
+                critic_obs_batch,
+                actions_batch,
+                target_values_batch,
+                advantages_batch,
+                returns_batch,
+                old_actions_log_prob_batch,
+            )
+
+        obs_batch, actions_batch = self.data_augmentation_func(None, obs_batch, actions_batch)
+        critic_obs_batch, _ = self.data_augmentation_func(None, critic_obs_batch, None)
+        target_values_batch = target_values_batch.repeat(2, 1)
+        advantages_batch = advantages_batch.repeat(2, 1)
+        returns_batch = returns_batch.repeat(2, 1)
+        old_actions_log_prob_batch = old_actions_log_prob_batch.repeat(2, 1)
+
+        return (
+            obs_batch,
+            critic_obs_batch,
+            actions_batch,
+            target_values_batch,
+            advantages_batch,
+            returns_batch,
+            old_actions_log_prob_batch,
+        )
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shapes, critic_obs_shapes, actions_shape):
         self.storage = Go2MargOracleRolloutStorage(
@@ -128,12 +179,8 @@ class Go2MargOraclePPO:
                 advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
             self.policy.act(obs_batch)
-            actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
-            value_batch = self.policy.evaluate(critic_obs_batch)
             mu_batch = self.policy.action_mean
             sigma_batch = self.policy.action_std
-            entropy_batch = self.policy.entropy
-            est_batch = self.policy.estimate(obs_batch)
 
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
@@ -151,6 +198,30 @@ class Go2MargOraclePPO:
                         self.learning_rate = min(1e-2, self.learning_rate * 1.5)
                     for param_group in self.optimizer.param_groups:
                         param_group["lr"] = self.learning_rate
+
+            (
+                obs_batch,
+                critic_obs_batch,
+                actions_batch,
+                target_values_batch,
+                advantages_batch,
+                returns_batch,
+                old_actions_log_prob_batch,
+            ) = self._augment_batch_with_symmetry(
+                obs_batch,
+                critic_obs_batch,
+                actions_batch,
+                target_values_batch,
+                advantages_batch,
+                returns_batch,
+                old_actions_log_prob_batch,
+            )
+
+            self.policy.act(obs_batch)
+            actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
+            value_batch = self.policy.evaluate(critic_obs_batch)
+            entropy_batch = self.policy.entropy
+            est_batch = self.policy.estimate(obs_batch)
 
             ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
             surrogate = -torch.squeeze(advantages_batch) * ratio

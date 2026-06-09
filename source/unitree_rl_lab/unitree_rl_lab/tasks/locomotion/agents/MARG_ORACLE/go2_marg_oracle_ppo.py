@@ -3,9 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-from isaaclab_rl.rsl_rl.symmetry_cfg import RslRlSymmetryCfg
-from unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_rsl_rl_ppo_cfg import compute_symmetric_states_go2_marg_oracle
+from isaaclab.utils.string import string_to_callable
 
 from .go2_marg_oracle_rollout_storage import Go2MargOracleRolloutStorage
 
@@ -43,12 +41,7 @@ class Go2MargOraclePPO:
         estimator_loss_coef=1.0,
         velocity_loss_coef=1.0,
         contact_loss_coef=1.0,
-        symmetry_cfg=RslRlSymmetryCfg(
-            use_data_augmentation=True,
-            mirror_loss_coeff=0.1,
-            use_mirror_loss=True,
-            data_augmentation_func=compute_symmetric_states_go2_marg_oracle,
-        ),
+        symmetry_cfg=None,
         **kwargs,
     ):
         self.device = device
@@ -78,6 +71,8 @@ class Go2MargOraclePPO:
         self.use_mirror_loss = self._get_symmetry_cfg_value("use_mirror_loss", False)
         self.mirror_loss_coeff = self._get_symmetry_cfg_value("mirror_loss_coeff", 0.0)
         self.data_augmentation_func = self._get_symmetry_cfg_value("data_augmentation_func", None)
+        if isinstance(self.data_augmentation_func, str):
+            self.data_augmentation_func = string_to_callable(self.data_augmentation_func)
 
     def _get_symmetry_cfg_value(self, name: str, default):
         if self.symmetry_cfg is None:
@@ -124,6 +119,25 @@ class Go2MargOraclePPO:
             old_actions_log_prob_batch,
         )
 
+    def _compute_mirror_loss(self, obs_batch):
+        if (
+            not self.use_mirror_loss
+            or self.mirror_loss_coeff <= 0.0
+            or not callable(self.data_augmentation_func)
+        ):
+            return next(iter(obs_batch.values())).new_zeros(())
+
+        batch_size = next(iter(obs_batch.values())).shape[0]
+        obs_aug, _ = self.data_augmentation_func(None, obs_batch, None)
+        mirrored_obs = {key: value[batch_size:] for key, value in obs_aug.items()}
+
+        action_mean = self.policy.act_inference(obs_batch)
+        mirrored_obs_action_mean = self.policy.act_inference(mirrored_obs)
+        _, action_mean_aug = self.data_augmentation_func(None, None, action_mean)
+        mirrored_action_mean = action_mean_aug[batch_size:].detach()
+
+        return torch.nn.functional.mse_loss(mirrored_obs_action_mean, mirrored_action_mean)
+
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shapes, critic_obs_shapes, actions_shape):
         self.storage = Go2MargOracleRolloutStorage(
             num_envs=num_envs,
@@ -168,6 +182,7 @@ class Go2MargOraclePPO:
         mean_velocity_loss = 0.0
         mean_contact_loss = 0.0
         mean_estimator_loss = 0.0
+        mean_mirror_loss = 0.0
 
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
@@ -185,6 +200,8 @@ class Go2MargOraclePPO:
         ) in generator:
             if self.normalize_advantage_per_mini_batch:
                 advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
+
+            mirror_loss = self._compute_mirror_loss(obs_batch)
 
             self.policy.act(obs_batch)
             mu_batch = self.policy.action_mean
@@ -263,6 +280,7 @@ class Go2MargOraclePPO:
                 + self.value_loss_coef * value_loss
                 - self.entropy_coef * entropy_batch.mean()
                 + self.estimator_loss_coef * estimator_loss
+                + self.mirror_loss_coeff * mirror_loss
             )
 
             self.optimizer.zero_grad()
@@ -276,6 +294,7 @@ class Go2MargOraclePPO:
             mean_velocity_loss += velocity_loss.item()
             mean_contact_loss += contact_loss.item()
             mean_estimator_loss += estimator_loss.item()
+            mean_mirror_loss += mirror_loss.item()
             num_updates += 1
 
         self.storage.clear()
@@ -286,4 +305,5 @@ class Go2MargOraclePPO:
             "velocity": mean_velocity_loss / num_updates,
             "contact": mean_contact_loss / num_updates,
             "estimator": mean_estimator_loss / num_updates,
+            "mirror": mean_mirror_loss / num_updates,
         }

@@ -47,7 +47,7 @@ algorithm:
     use_data_augmentation: true
     use_mirror_loss: true
     data_augmentation_func: unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_rsl_rl_ppo_cfg:compute_symmetric_states_go2_marg_oracle
-    mirror_loss_coeff: 0.0
+    mirror_loss_coeff: 0.1
   rnd_cfg: null
   estimator_loss_coef: 1.0
   velocity_loss_coef: 1.0
@@ -59,7 +59,7 @@ run_name: ''
 logger: tensorboard
 neptune_project: isaaclab
 wandb_project: isaaclab
-resume: true
+resume: false
 load_run: .*
 load_checkpoint: model_.*.pt
 runner_class_name: unitree_rl_lab.tasks.locomotion.agents.MARG_ORACLE.go2_marg_oracle_runner:Go2MargOracleRunner

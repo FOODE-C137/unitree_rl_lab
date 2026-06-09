@@ -115,7 +115,7 @@ class Go2MargOracleRiskTerrainPPORunnerCfg(Go2MargOraclePPORunnerCfg):
         max_grad_norm=1.0,
         symmetry_cfg=RslRlSymmetryCfg(
             use_data_augmentation=True,
-            mirror_loss_coeff=0.0,
+            mirror_loss_coeff=0.1,
             use_mirror_loss=True,
             data_augmentation_func=compute_symmetric_states_go2_marg_oracle,
         ),

@@ -125,16 +125,24 @@ def _stones_everywhere(
     one_row: bool = False,
     depth: float = 0.6,
     platform_size: float = 2.0,
+    lateral_stone_scale: float = 1.0,
+    lateral_gap_scale: float = 1.0,
+    forward_gap_scale: float = 1.0,
 ):
     depth_units = -abs(_height_to_units(terrain, depth))
     terrain.height_field_raw[:, :] = depth_units
     stone_size_m = max(0.22, 0.8 - 0.5 * difficulty)
     stone = int(np.clip(_meter_to_index(terrain, stone_size_m), 4, 18))
+    stone_lateral = max(1, int(round(stone * lateral_stone_scale)))
     forward_gap = int(
         np.clip(
             _meter_to_index(
                 terrain,
-                cfg.step_stone_gap_min_m + (cfg.step_stone_gap_max_m - cfg.step_stone_gap_min_m) * difficulty,
+                (
+                    cfg.step_stone_gap_min_m
+                    + (cfg.step_stone_gap_max_m - cfg.step_stone_gap_min_m) * difficulty
+                )
+                * forward_gap_scale,
             ),
             cfg.step_stone_gap_min_cells,
             cfg.step_stone_gap_max_cells,
@@ -147,16 +155,16 @@ def _stones_everywhere(
             cfg.stone_lateral_gap_max_m,
         )
     )
-    lateral_gap = int(np.floor(lateral_gap_m / terrain.horizontal_scale + 1e-9))
+    lateral_gap = int(np.floor(lateral_gap_m * lateral_gap_scale / terrain.horizontal_scale + 1e-9))
     max_h = int(np.clip(_height_to_units(terrain, 0.05 + 0.18 * difficulty), 1, 40))
     heights = np.arange(0, max_h + 1, step=max(1, max_h // 6), dtype=np.int16)
     platform = max(1, _meter_to_index(terrain, platform_size))
     y_center = terrain.length // 2
     if two_rows:
         first_row_end = y_center - lateral_gap // 2
-        rows = [first_row_end - stone, first_row_end + lateral_gap]
+        rows = [first_row_end - stone_lateral, first_row_end + lateral_gap]
     else:
-        rows = [y_center - stone // 2]
+        rows = [y_center - stone_lateral // 2]
 
     x = 0
     row_offsets = [0, (stone + forward_gap) // 2] if two_rows and staggered_rows else [0] * len(rows)
@@ -164,12 +172,12 @@ def _stones_everywhere(
         if one_row or two_rows:
             for y, x_offset in zip(rows, row_offsets):
                 x0 = x + x_offset
-                _fill_rect(terrain, x0, x0 + stone, y, y + stone, _choice(heights, rng))
+                _fill_rect(terrain, x0, x0 + stone, y, y + stone_lateral, _choice(heights, rng))
         else:
             y = 0
             while y < terrain.length:
-                _fill_rect(terrain, x, x + stone, y, y + stone, _choice(heights, rng))
-                y += stone + lateral_gap
+                _fill_rect(terrain, x, x + stone, y, y + stone_lateral, _choice(heights, rng))
+                y += stone_lateral + lateral_gap
         x += stone + forward_gap
 
     _clear_start_platform(terrain, platform_size)
@@ -402,7 +410,18 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
     elif terrain_type == "step_stone":
         _stones_everywhere(terrain, rng, difficulty, gap_cfg, depth=0.6, platform_size=2.0)
     elif terrain_type == "stones_2rows":
-        _stones_everywhere(terrain, rng, difficulty, gap_cfg, two_rows=True, depth=0.6, platform_size=2.0)
+        _stones_everywhere(
+            terrain,
+            rng,
+            difficulty,
+            gap_cfg,
+            two_rows=True,
+            depth=0.6,
+            platform_size=2.0,
+            lateral_stone_scale=0.5,
+            lateral_gap_scale=0.5,
+            forward_gap_scale=0.5,
+        )
     elif terrain_type == "stones_2rows_staggered":
         _stones_everywhere(
             terrain,
@@ -413,6 +432,9 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             staggered_rows=True,
             depth=0.6,
             platform_size=2.0,
+            lateral_stone_scale=0.5,
+            lateral_gap_scale=0.5,
+            forward_gap_scale=0.5,
         )
     elif terrain_type == "stones_1row":
         _stones_everywhere(terrain, rng, difficulty, gap_cfg, one_row=True, depth=0.6, platform_size=2.0)

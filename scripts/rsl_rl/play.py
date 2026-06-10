@@ -43,6 +43,9 @@ parser.add_argument("--keyboard", action="store_true", default=False, help="Use 
 parser.add_argument("--keyboard_vx", type=float, default=1.0, help="Keyboard forward/backward velocity scale.")
 parser.add_argument("--keyboard_vy", type=float, default=1.0, help="Keyboard lateral velocity scale.")
 parser.add_argument("--keyboard_wz", type=float, default=1.0, help="Keyboard yaw velocity scale.")
+parser.add_argument("--keyboard_speed_step", type=float, default=0.1, help="Keyboard speed change per A/D press.")
+parser.add_argument("--keyboard_speed_min", type=float, default=0.0, help="Minimum keyboard command speed scale.")
+parser.add_argument("--keyboard_speed_max", type=float, default=3.0, help="Maximum keyboard command speed scale.")
 parser.add_argument("--keyboard_smoothing", type=float, default=0.3, help="Low-pass factor for keyboard commands.")
 parser.add_argument("--follow_camera_distance", type=float, default=3, help="Follow camera distance behind robot.")
 parser.add_argument("--follow_camera_height", type=float, default=1.4, help="Follow camera height above robot.")
@@ -301,6 +304,7 @@ def main():
     dt = env.unwrapped.step_dt
     keyboard = None
     filtered_keyboard_command = None
+    keyboard_speed_scale = 1.0
     reset_requested = False
     pending_terrain_column = None
     terrain_column_names = []
@@ -315,6 +319,14 @@ def main():
         reset_requested = True
         print(f"[INFO]: Requested terrain {column + 1}: {terrain_column_names[column]}")
 
+    def adjust_keyboard_speed(delta: float):
+        nonlocal keyboard_speed_scale
+        keyboard_speed_scale = max(
+            args_cli.keyboard_speed_min,
+            min(args_cli.keyboard_speed_max, keyboard_speed_scale + delta),
+        )
+        print(f"[INFO]: Keyboard speed scale: {keyboard_speed_scale:.2f}")
+
     if args_cli.keyboard:
         keyboard = Se2Keyboard(
             Se2KeyboardCfg(
@@ -325,6 +337,8 @@ def main():
             )
         )
         keyboard.add_callback("ENTER", request_reset)
+        keyboard.add_callback("A", lambda: adjust_keyboard_speed(-args_cli.keyboard_speed_step))
+        keyboard.add_callback("D", lambda: adjust_keyboard_speed(args_cli.keyboard_speed_step))
         terrain_column_names = _get_terrain_column_names(env)
         for column, _ in enumerate(terrain_column_names[:9]):
             callback = lambda column=column: request_terrain_reset(column)
@@ -332,6 +346,11 @@ def main():
             keyboard.add_callback(str(column + 1), callback)
         print(keyboard)
         print("\tReset robot pose: ENTER")
+        print(
+            f"\tAdjust keyboard speed: A/D "
+            f"({args_cli.keyboard_speed_min:.1f}-{args_cli.keyboard_speed_max:.1f}, "
+            f"step {args_cli.keyboard_speed_step:.1f})"
+        )
         if terrain_column_names:
             print("\tSelect terrain and respawn:")
             for column, terrain_name in enumerate(terrain_column_names[:9]):
@@ -384,7 +403,7 @@ def main():
 
             command = None
             if keyboard is not None:
-                raw_command = keyboard.advance()
+                raw_command = keyboard.advance() * keyboard_speed_scale
                 filtered_keyboard_command = (
                     (1.0 - args_cli.keyboard_smoothing) * filtered_keyboard_command
                     + args_cli.keyboard_smoothing * raw_command

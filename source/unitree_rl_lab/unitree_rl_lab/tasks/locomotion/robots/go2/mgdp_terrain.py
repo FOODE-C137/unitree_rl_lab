@@ -9,7 +9,7 @@ from isaaclab.utils import configclass
 
 MGDP_GAP_PARKOUR_WEIGHTS = {
     "single_gap": 0.1,
-    "step_stone": 0.1,
+    "stone_everywhere": 0.1,
     "stones_2rows": 0.1,
     "stones_2rows_staggered": 0.1,
     "stones_1row": 0.1,
@@ -24,10 +24,10 @@ class MGDPGapParkourCfg:
     single_gap_min_cells: int = 1
     single_gap_max_cells: int = 12
 
-    step_stone_gap_min_m: float = 0.05
-    step_stone_gap_max_m: float = 0.45
-    step_stone_gap_min_cells: int = 1
-    step_stone_gap_max_cells: int = 9
+    stone_everywhere_gap_min_m: float = 0.05
+    stone_everywhere_gap_max_m: float = 0.45
+    stone_everywhere_gap_min_cells: int = 1
+    stone_everywhere_gap_max_cells: int = 9
     stone_lateral_gap_min_m: float = 0.0
     stone_lateral_gap_max_m: float = 0.2
 
@@ -142,13 +142,13 @@ def _stones_everywhere(
             _meter_to_index(
                 terrain,
                 (
-                    cfg.step_stone_gap_min_m
-                    + (cfg.step_stone_gap_max_m - cfg.step_stone_gap_min_m) * difficulty
+                    cfg.stone_everywhere_gap_min_m
+                    + (cfg.stone_everywhere_gap_max_m - cfg.stone_everywhere_gap_min_m) * difficulty
                 )
                 * forward_gap_scale,
             ),
-            cfg.step_stone_gap_min_cells,
-            cfg.step_stone_gap_max_cells,
+            cfg.stone_everywhere_gap_min_cells,
+            cfg.stone_everywhere_gap_max_cells,
         )
     )
     lateral_gap_m = float(
@@ -410,7 +410,7 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
 
     if terrain_type == "single_gap":
         _parkour_gap_terrain(terrain, difficulty, gap_cfg, depth=0.6, platform_size=2.0)
-    elif terrain_type == "step_stone":
+    elif terrain_type == "stone_everywhere":
         _stones_everywhere(terrain, rng, difficulty, gap_cfg, depth=0.6, platform_size=2.0)
     elif terrain_type == "stones_2rows":
         _stones_everywhere(
@@ -421,8 +421,8 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             two_rows=True,
             depth=0.6,
             platform_size=2.0,
-            lateral_stone_scale=0.5,
-            lateral_gap_scale=0.5,
+            lateral_stone_scale=0.25,
+            lateral_gap_scale=1.0,
             forward_gap_scale=0.5,
             forward_stone_scale=1.0 / 2.0,
             height_scale=0.5,
@@ -437,8 +437,8 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             staggered_rows=True,
             depth=0.6,
             platform_size=2.0,
-            lateral_stone_scale=0.5,
-            lateral_gap_scale=0.5,
+            lateral_stone_scale=0.25,
+            lateral_gap_scale=1.0,
             forward_gap_scale=0.5,
             forward_stone_scale=1.0 / 2.0,
             height_scale=0.5,

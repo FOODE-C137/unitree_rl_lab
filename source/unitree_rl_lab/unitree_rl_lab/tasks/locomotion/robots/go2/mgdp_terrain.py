@@ -14,11 +14,13 @@ MGDP_GAP_PARKOUR_WEIGHTS = {
     "stones_2rows_staggered": 0.1,
     "stones_1row": 0.1,
     "single_bridge": 0.1,
+    "stairs": 0.1,
+    "beams": 0.1,
     "air_beams": 0.1,
     "air_stone": 0.1,
 }
 
-MGDP_PIT_DEPTH_M = 2.0
+MGDP_PIT_DEPTH_M = 0.6
 
 
 @configclass
@@ -35,9 +37,29 @@ class MGDPGapParkourCfg:
 
     air_beam_gap_min_m: float = 0.05
     air_beam_gap_max_m: float = 0.5
+    air_beam_height_delta_max_m: float = 0.4
+
+    beam_gap_min_m: float = 0.05
+    beam_gap_max_m: float = 0.40
+    beam_width_min_m: float = 0.20
+    beam_width_max_m: float = 0.30
+    beam_height_min_m: float = 0.05
+    beam_height_max_m: float = 0.50
+    beam_length_min_m: float = 0.35
+    beam_length_max_m: float = 0.75
+
+    stair_step_height_min_m: float = 0.05
+    stair_step_height_max_m: float = 0.20
+    stair_step_depth_min_m: float = 0.25
+    stair_step_depth_max_m: float = 0.40
+    stair_width_min_m: float = 0.50
+    stair_width_max_m: float = 2.00
+    stair_top_platform_length_min_m: float = 1.00
+    stair_top_platform_length_max_m: float = 2.00
 
     air_stone_step_min_m: float = 0.05
     air_stone_step_max_m: float = 0.6
+    air_stone_height_delta_max_m: float = 0.4
 
 
 MGDP_GAP_PARKOUR_CFG = MGDPGapParkourCfg()
@@ -70,6 +92,11 @@ def _choice(values: np.ndarray, rng: np.random.Generator, default: int = 0) -> i
     if values.size == 0:
         return int(default)
     return int(rng.choice(values))
+
+
+def _lerp_range(min_value: float, max_value: float, difficulty: float) -> float:
+    difficulty = float(np.clip(difficulty, 0.0, 1.0))
+    return float(min_value + (max_value - min_value) * difficulty)
 
 
 def _fill_rect(terrain: _SubTerrain, x0: int, x1: int, y0: int, y1: int, height_units: int) -> None:
@@ -128,6 +155,77 @@ def _single_bridge_terrain(
     _clear_start_platform(terrain, platform_size)
 
 
+def _stairs_terrain(
+    terrain: _SubTerrain,
+    difficulty: float,
+    cfg: MGDPGapParkourCfg,
+    depth: float = MGDP_PIT_DEPTH_M,
+    platform_size: float = 2.0,
+) -> None:
+    depth_units = -abs(_height_to_units(terrain, depth))
+    terrain.height_field_raw[:, :] = depth_units
+
+    step_height_units = max(
+        1,
+        _height_to_units(
+            terrain,
+            _lerp_range(cfg.stair_step_height_min_m, cfg.stair_step_height_max_m, difficulty),
+        ),
+    )
+    step_depth = max(
+        1,
+        _meter_to_index(terrain, _lerp_range(cfg.stair_step_depth_max_m, cfg.stair_step_depth_min_m, difficulty)),
+    )
+    stair_width = max(
+        1,
+        _meter_to_index(terrain, _lerp_range(cfg.stair_width_max_m, cfg.stair_width_min_m, difficulty)),
+    )
+    top_platform = max(
+        1,
+        _meter_to_index(
+            terrain,
+            _lerp_range(cfg.stair_top_platform_length_max_m, cfg.stair_top_platform_length_min_m, difficulty),
+        ),
+    )
+
+    platform = max(1, _meter_to_index(terrain, platform_size))
+    y0 = terrain.length // 2 - stair_width // 2
+    y1 = y0 + stair_width
+    end_platform_start = max(platform, terrain.width - platform)
+    top_start = max(platform, terrain.width // 2 - top_platform // 2)
+    top_end = min(end_platform_start, top_start + top_platform)
+
+    _clear_start_platform(terrain, platform_size)
+    _fill_rect(
+        terrain,
+        end_platform_start,
+        terrain.width,
+        (terrain.length - platform) // 2,
+        (terrain.length + platform) // 2,
+        0,
+    )
+
+    x = platform
+    stair_index = 1
+    while x < top_start:
+        x_next = min(top_start, x + step_depth)
+        _fill_rect(terrain, x, x_next, y0, y1, stair_index * step_height_units)
+        x = x_next
+        stair_index += 1
+
+    top_height_units = max(0, (stair_index - 1) * step_height_units)
+    _fill_rect(terrain, top_start, top_end, y0, y1, top_height_units)
+
+    x = top_end
+    stair_index = 1
+    while x < end_platform_start:
+        x_next = min(end_platform_start, x + step_depth)
+        height_units = max(0, top_height_units - stair_index * step_height_units)
+        _fill_rect(terrain, x, x_next, y0, y1, height_units)
+        x = x_next
+        stair_index += 1
+
+
 def _stones_everywhere(
     terrain: _SubTerrain,
     rng: np.random.Generator,
@@ -172,7 +270,13 @@ def _stones_everywhere(
         )
     )
     lateral_gap = int(np.floor(lateral_gap_m * lateral_gap_scale / terrain.horizontal_scale + 1e-9))
-    max_h = int(np.clip(_height_to_units(terrain, (0.05 + 0.18 * difficulty) * height_scale), 1, 40))
+    max_h = int(
+        np.clip(
+            _height_to_units(terrain, (0.05 + 0.35 * difficulty) * height_scale),
+            1,
+            _height_to_units(terrain, 0.4 * height_scale),
+        )
+    )
     heights = np.arange(0, max_h + 1, step=max(1, max_h // 6), dtype=np.int16)
     platform = max(1, _meter_to_index(terrain, platform_size))
     spawn_rect = (0, platform, (terrain.length - platform) // 2, (terrain.length + platform) // 2)
@@ -227,7 +331,7 @@ def _air_beam_meshes(
     x = platform_size + 0.5 * beam_x
     while x < sx - 0.5 * beam_x:
         beam_y = float(rng.uniform(beam_y_min, beam_y_max))
-        z = float(rng.uniform(0.05, 0.05 + 0.18 * difficulty))
+        z = float(rng.uniform(0.05, 0.05 + cfg.air_beam_height_delta_max_m * difficulty))
         beam_specs.append((beam_x, beam_y, z + 0.05, 0.1, x, 0.5 * sy))
         x += beam_x + gap
 
@@ -240,6 +344,52 @@ def _air_beam_meshes(
     ]
 
 
+def _beam_meshes(
+    terrain: _SubTerrain,
+    rng: np.random.Generator,
+    difficulty: float,
+    cfg: MGDPGapParkourCfg,
+    depth: float = MGDP_PIT_DEPTH_M,
+    platform_size: float = 2.0,
+) -> list[trimesh.Trimesh]:
+    meshes: list[trimesh.Trimesh] = []
+    sx = (terrain.width - 1) * terrain.horizontal_scale
+    sy = (terrain.length - 1) * terrain.horizontal_scale
+    beam_x = _lerp_range(cfg.beam_width_max_m, cfg.beam_width_min_m, difficulty)
+    gap = _lerp_range(cfg.beam_gap_min_m, cfg.beam_gap_max_m, difficulty)
+    max_height = _lerp_range(cfg.beam_height_min_m, cfg.beam_height_max_m, difficulty)
+    base_z = -abs(depth)
+    platform = max(1, _meter_to_index(terrain, platform_size))
+    spawn_rect = (0, platform, (terrain.length - platform) // 2, (terrain.length + platform) // 2)
+    x = platform_size + 0.5 * beam_x
+
+    while x < sx - 0.5 * beam_x:
+        beam_y = float(rng.uniform(cfg.beam_length_min_m, cfg.beam_length_max_m))
+        center_y = 0.5 * sy
+        top_z = float(rng.uniform(0.0, max_height))
+        rect = (
+            int(np.floor((x - 0.5 * beam_x) / terrain.horizontal_scale + 1e-9)),
+            int(np.ceil((x + 0.5 * beam_x) / terrain.horizontal_scale - 1e-9)),
+            int(np.floor((center_y - 0.5 * beam_y) / terrain.horizontal_scale + 1e-9)),
+            int(np.ceil((center_y + 0.5 * beam_y) / terrain.horizontal_scale - 1e-9)),
+        )
+        if _rects_overlap(rect, spawn_rect):
+            top_z = 0.0
+        meshes.append(
+            _make_box_xy(
+                size_x=beam_x,
+                size_y=beam_y,
+                top_z=top_z,
+                height=max(terrain.vertical_scale, top_z - base_z),
+                center_x=x,
+                center_y=center_y,
+            )
+        )
+        x += beam_x + gap
+
+    return meshes
+
+
 def _air_stone_meshes(
     terrain: _SubTerrain,
     rng: np.random.Generator,
@@ -248,17 +398,24 @@ def _air_stone_meshes(
     platform_size: float = 2.0,
     first_top_z: float = 0.0,
 ) -> list[trimesh.Trimesh]:
-    meshes: list[trimesh.Trimesh] = []
+    stone_specs: list[tuple[float, float, float, float, float, float]] = []
     sx = (terrain.width - 1) * terrain.horizontal_scale
     sy = (terrain.length - 1) * terrain.horizontal_scale
     stone_x = 0.45
     stone_y = float(rng.uniform(0.9, 1.25))
-    top_z = first_top_z
     x = platform_size + 0.5 * stone_x
     while x < sx - 0.5 * stone_x:
-        meshes.append(_make_box_xy(stone_x, stone_y, top_z, 0.12, x, 0.5 * sy))
+        top_z = float(rng.uniform(0.0, cfg.air_stone_height_delta_max_m * difficulty))
+        stone_specs.append((stone_x, stone_y, top_z, 0.12, x, 0.5 * sy))
         x += stone_x + (cfg.air_stone_step_min_m + (cfg.air_stone_step_max_m - cfg.air_stone_step_min_m) * difficulty)
-    return meshes
+
+    if not stone_specs:
+        return []
+    z_offset = stone_specs[0][2] - first_top_z
+    return [
+        _make_box_xy(size_x, size_y, top_z - z_offset, height, center_x, center_y)
+        for size_x, size_y, top_z, height, center_x, center_y in stone_specs
+    ]
 
 
 def _make_box_xy(size_x: float, size_y: float, top_z: float, height: float, center_x: float, center_y: float):
@@ -448,7 +605,7 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             lateral_gap_scale=1.0,
             forward_gap_scale=0.5,
             forward_stone_scale=1.0 / 2.0,
-            height_scale=0.5,
+            height_scale=1.0,
         )
     elif terrain_type == "stones_2rows_staggered":
         _stones_everywhere(
@@ -464,12 +621,26 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             lateral_gap_scale=1.0,
             forward_gap_scale=0.5,
             forward_stone_scale=1.0 / 2.0,
-            height_scale=0.5,
+            height_scale=1.0,
         )
     elif terrain_type == "stones_1row":
-        _stones_everywhere(terrain, rng, difficulty, gap_cfg, one_row=True, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
+        _stones_everywhere(
+            terrain,
+            rng,
+            difficulty,
+            gap_cfg,
+            one_row=True,
+            depth=MGDP_PIT_DEPTH_M,
+            platform_size=2.0,
+            height_scale=1.0,
+        )
     elif terrain_type == "single_bridge":
         _single_bridge_terrain(terrain, difficulty, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
+    elif terrain_type == "stairs":
+        _stairs_terrain(terrain, difficulty, gap_cfg, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
+    elif terrain_type == "beams":
+        terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, MGDP_PIT_DEPTH_M))
+        _clear_start_platform(terrain, 2.0)
     elif terrain_type == "air_beams":
         terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, MGDP_PIT_DEPTH_M))
         _clear_start_platform(terrain, 2.0)
@@ -488,6 +659,8 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             outer_wall_top_z=getattr(cfg, "outer_wall_top_z", 0.0),
         )
     ]
+    if terrain_type == "beams":
+        meshes.extend(_beam_meshes(terrain, rng, difficulty, gap_cfg, depth=MGDP_PIT_DEPTH_M, platform_size=2.0))
     if terrain_type == "air_beams" and cfg.add_air_beams:
         meshes.extend(
             _air_beam_meshes(

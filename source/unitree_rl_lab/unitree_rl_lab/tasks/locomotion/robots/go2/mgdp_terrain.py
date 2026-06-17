@@ -81,6 +81,12 @@ def _fill_rect(terrain: _SubTerrain, x0: int, x1: int, y0: int, y1: int, height_
         terrain.height_field_raw[x0:x1, y0:y1] = height_units
 
 
+def _rects_overlap(rect_a: tuple[int, int, int, int], rect_b: tuple[int, int, int, int]) -> bool:
+    ax0, ax1, ay0, ay1 = rect_a
+    bx0, bx1, by0, by1 = rect_b
+    return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
+
+
 def _clear_start_platform(terrain: _SubTerrain, platform_size: float, height_units: int = 0) -> int:
     platform = max(1, _meter_to_index(terrain, platform_size))
     _fill_rect(terrain, 0, platform, (terrain.length - platform) // 2, (terrain.length + platform) // 2, height_units)
@@ -169,6 +175,8 @@ def _stones_everywhere(
     max_h = int(np.clip(_height_to_units(terrain, (0.05 + 0.18 * difficulty) * height_scale), 1, 40))
     heights = np.arange(0, max_h + 1, step=max(1, max_h // 6), dtype=np.int16)
     platform = max(1, _meter_to_index(terrain, platform_size))
+    spawn_rect = (0, platform, (terrain.length - platform) // 2, (terrain.length + platform) // 2)
+    stone_rects: list[tuple[int, int, int, int]] = []
     y_center = terrain.length // 2
     if two_rows:
         first_row_end = y_center - lateral_gap // 2
@@ -182,13 +190,21 @@ def _stones_everywhere(
         if one_row or two_rows:
             for y, x_offset in zip(rows, row_offsets):
                 x0 = x + x_offset
-                _fill_rect(terrain, x0, x0 + stone_forward, y, y + stone_lateral, _choice(heights, rng))
+                rect = (x0, x0 + stone_forward, y, y + stone_lateral)
+                stone_rects.append(rect)
+                _fill_rect(terrain, *rect, _choice(heights, rng))
         else:
             y = 0
             while y < terrain.length:
-                _fill_rect(terrain, x, x + stone_forward, y, y + stone_lateral, _choice(heights, rng))
+                rect = (x, x + stone_forward, y, y + stone_lateral)
+                stone_rects.append(rect)
+                _fill_rect(terrain, *rect, _choice(heights, rng))
                 y += stone_lateral + lateral_gap
         x += stone_forward + forward_gap
+
+    for rect in stone_rects:
+        if _rects_overlap(rect, spawn_rect):
+            _fill_rect(terrain, *rect, 0)
 
     _clear_start_platform(terrain, platform_size)
 

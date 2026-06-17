@@ -834,4 +834,3 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         super().__post_init__()
         self.scene.num_envs = 256
         self.events.push_robot = None
-        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

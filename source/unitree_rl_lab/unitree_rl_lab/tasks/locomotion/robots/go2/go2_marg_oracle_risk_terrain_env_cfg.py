@@ -1,4 +1,5 @@
 import math
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
@@ -826,11 +827,38 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
 
 
+PLAY_TERRAIN_TYPE = "mgdp"
+
+
+def _play_terrain_generator_cfg(terrain_type: str):
+    from .test_terrain import TEST_TERRAIN_GENERATOR_CFG
+
+    terrain_generator_cfgs = {
+        "mgdp": MGDP_TERRAIN_GENERATOR_CFG,
+        "test": TEST_TERRAIN_GENERATOR_CFG,
+    }
+    terrain_type = terrain_type.strip().lower()
+    if terrain_type not in terrain_generator_cfgs:
+        valid_names = ", ".join(sorted(terrain_generator_cfgs))
+        raise ValueError(f"Unknown play terrain type '{terrain_type}'. Valid options: {valid_names}.")
+    return terrain_type, deepcopy(terrain_generator_cfgs[terrain_type])
+
+
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
     """Play config for the Go2 Marg-Oracle velocity task."""
 
+    play_terrain_type: str = PLAY_TERRAIN_TYPE
+
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 256
+        play_terrain_type, terrain_generator_cfg = _play_terrain_generator_cfg(self.play_terrain_type)
+        self.scene.terrain.terrain_generator = terrain_generator_cfg
+        if play_terrain_type == "test":
+            self.scene.terrain.terrain_generator.curriculum = False
+            self.scene.terrain.terrain_generator.num_rows = 3
+        self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
+        self.commands.base_velocity.ranges = deepcopy(self.commands.base_velocity.limit_ranges)
         self.events.push_robot = None
+        self.terminations.feet_on_base_plane_linear = None

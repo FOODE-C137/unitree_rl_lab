@@ -18,7 +18,7 @@ MGDP_GAP_PARKOUR_WEIGHTS = {
     "air_stone": 0.1,
 }
 
-MGDP_PIT_DEPTH_M = 0.6
+MGDP_PIT_DEPTH_M = 2.0
 
 
 @configclass

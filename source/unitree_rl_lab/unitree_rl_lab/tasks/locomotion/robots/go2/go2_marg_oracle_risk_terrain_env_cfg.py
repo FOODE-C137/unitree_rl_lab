@@ -447,18 +447,16 @@ def _augment_go2_marg_oracle_obs(obs: dict[str, torch.Tensor]) -> dict[str, torc
     obs_aug = {}
 
     for key, value in obs.items():
-        mirrored = value.clone()
         if key in ("policy_raw_obs", "policy"):
-            mirrored = _transform_proprio_obs_left_right(mirrored)
+            mirrored = _transform_proprio_obs_left_right(value)
         elif key == "policy_history_obs":
-            mirrored = _transform_proprio_history_left_right(mirrored)
+            mirrored = _transform_proprio_history_left_right(value)
         elif key == "policy_terrain_obs":
-            mirrored = _transform_terrain_map_left_right(mirrored)
+            mirrored = _transform_terrain_map_left_right(value)
         elif key == "privileged_obs":
-            mirrored = _transform_privileged_obs_left_right(mirrored)
+            mirrored = _transform_privileged_obs_left_right(value)
         else:
-            # Unknown groups are duplicated unchanged.
-            mirrored = value.clone()
+            mirrored = value
 
         obs_aug[key] = torch.empty(batch_size * 2, *value.shape[1:], device=value.device, dtype=value.dtype)
         obs_aug[key][:batch_size] = value
@@ -533,8 +531,6 @@ def _switch_go2_joints_left_right(joint_data: torch.Tensor, flip_haa: bool) -> t
         joint_data_switched[..., GO2_HAA_JOINT_IDS] *= -1.0
 
     return joint_data_switched
-
-
 
 
 # =========================== Observation Space ===========================
@@ -684,9 +680,8 @@ class ObservationsCfg:
 # =========================================================================
 @configclass
 class ActionsCfg:
-    """12D joint action space for Go2 locomotion.
-        q_t^* = q_dot + a_t
-    """
+    """12D joint action space for Go2 locomotion."""
+
     JointPositionAction = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[".*"],
@@ -694,7 +689,6 @@ class ActionsCfg:
         use_default_offset=True,
         clip={".*": (-100.0, 100.0)},
     )
-
 
 
 # =========================== Reward Config ===============================
@@ -709,7 +703,6 @@ class RewardsCfg:
         weight=-1.0,
         params={"command_name": "base_velocity", "cmd_threshold": 0.05},
     )
-    
     a_track_lin_vel_xy = RewTerm(
         func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
@@ -769,20 +762,13 @@ class RewardsCfg:
     )
 
 
-
-
 # =========================== Curriculum Config =============================
 # =========================================================================
 @configclass
 class CurriculumCfg:
-    """Curriculum terms for the MDP.
-    
-    Note: All curriculum functions are imported from unitree_rl_lab.tasks.locomotion.mdp
-    """
+    """Curriculum terms for the MDP."""
 
-    # Curriculum for terrain level progression based on robot performance
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    # Curriculum for velocity command range progression
     lin_vel_cmd_levels = CurrTerm(
         func=mdp.lin_vel_cmd_levels,
         params={
@@ -791,8 +777,6 @@ class CurriculumCfg:
             "lin_vel_y_delta": (0.0, 0.0),
         },
     )
-
-
 
 
 # =========================== Task & Play Config ==========================

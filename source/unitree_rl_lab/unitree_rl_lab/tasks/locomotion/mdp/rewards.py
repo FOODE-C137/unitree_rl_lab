@@ -29,13 +29,16 @@ def energy(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("r
 
 
 def stand_still(
-    env: ManagerBasedRLEnv, command_name: str = "base_velocity", asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: ManagerBasedRLEnv,
+    command_name: str = "base_velocity",
+    cmd_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
 
     reward = torch.sum(torch.abs(asset.data.joint_pos - asset.data.default_joint_pos), dim=1)
     cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
-    return reward * (cmd_norm < 0.1)
+    return reward * (cmd_norm < cmd_threshold)
 
 
 """

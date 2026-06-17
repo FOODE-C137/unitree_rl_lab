@@ -690,7 +690,8 @@ class RewardsCfg:
     # -- task
     stand_still = RewTerm(
         func=mdp.stand_still,
-        weight=-0.5,
+        weight=-1.0,
+        params={"command_name": "base_velocity", "cmd_threshold": 0.05},
     )
     
     a_track_lin_vel_xy = RewTerm(
@@ -832,4 +833,5 @@ class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 256
+        self.events.push_robot = None
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

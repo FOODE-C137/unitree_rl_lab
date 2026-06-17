@@ -18,6 +18,8 @@ MGDP_GAP_PARKOUR_WEIGHTS = {
     "air_stone": 0.1,
 }
 
+MGDP_PIT_DEPTH_M = 0.6
+
 
 @configclass
 class MGDPGapParkourCfg:
@@ -89,7 +91,7 @@ def _parkour_gap_terrain(
     terrain: _SubTerrain,
     difficulty: float,
     cfg: MGDPGapParkourCfg,
-    depth: float = 0.6,
+    depth: float = MGDP_PIT_DEPTH_M,
     platform_size: float = 2.0,
 ):
     depth_units = -abs(_height_to_units(terrain, depth))
@@ -106,7 +108,12 @@ def _parkour_gap_terrain(
     _fill_rect(terrain, start_x + gap, terrain.width - gap, gap, end_y - gap, 0)
 
 
-def _single_bridge_terrain(terrain: _SubTerrain, difficulty: float, depth: float = 0.6, platform_size: float = 2.0):
+def _single_bridge_terrain(
+    terrain: _SubTerrain,
+    difficulty: float,
+    depth: float = MGDP_PIT_DEPTH_M,
+    platform_size: float = 2.0,
+):
     depth_units = -abs(_height_to_units(terrain, depth))
     terrain.height_field_raw[:, :] = depth_units
     bridge_width = max(3, _meter_to_index(terrain, max(0.2, 0.8 - 0.6 * difficulty)))
@@ -123,7 +130,7 @@ def _stones_everywhere(
     two_rows: bool = False,
     staggered_rows: bool = False,
     one_row: bool = False,
-    depth: float = 0.6,
+    depth: float = MGDP_PIT_DEPTH_M,
     platform_size: float = 2.0,
     lateral_stone_scale: float = 1.0,
     lateral_gap_scale: float = 1.0,
@@ -409,9 +416,9 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
     gap_cfg = getattr(cfg, "gap_cfg", MGDP_GAP_PARKOUR_CFG)
 
     if terrain_type == "single_gap":
-        _parkour_gap_terrain(terrain, difficulty, gap_cfg, depth=0.6, platform_size=2.0)
+        _parkour_gap_terrain(terrain, difficulty, gap_cfg, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
     elif terrain_type == "stone_everywhere":
-        _stones_everywhere(terrain, rng, difficulty, gap_cfg, depth=0.6, platform_size=2.0)
+        _stones_everywhere(terrain, rng, difficulty, gap_cfg, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
     elif terrain_type == "stones_2rows":
         _stones_everywhere(
             terrain,
@@ -419,7 +426,7 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             difficulty,
             gap_cfg,
             two_rows=True,
-            depth=0.6,
+            depth=MGDP_PIT_DEPTH_M,
             platform_size=2.0,
             lateral_stone_scale=0.25,
             lateral_gap_scale=1.0,
@@ -435,7 +442,7 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             gap_cfg,
             two_rows=True,
             staggered_rows=True,
-            depth=0.6,
+            depth=MGDP_PIT_DEPTH_M,
             platform_size=2.0,
             lateral_stone_scale=0.25,
             lateral_gap_scale=1.0,
@@ -444,14 +451,14 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             height_scale=0.5,
         )
     elif terrain_type == "stones_1row":
-        _stones_everywhere(terrain, rng, difficulty, gap_cfg, one_row=True, depth=0.6, platform_size=2.0)
+        _stones_everywhere(terrain, rng, difficulty, gap_cfg, one_row=True, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
     elif terrain_type == "single_bridge":
-        _single_bridge_terrain(terrain, difficulty, depth=0.6, platform_size=2.0)
+        _single_bridge_terrain(terrain, difficulty, depth=MGDP_PIT_DEPTH_M, platform_size=2.0)
     elif terrain_type == "air_beams":
-        terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, 0.6))
+        terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, MGDP_PIT_DEPTH_M))
         _clear_start_platform(terrain, 2.0)
     elif terrain_type == "air_stone":
-        terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, 0.6))
+        terrain.height_field_raw[:, :] = -abs(_height_to_units(terrain, MGDP_PIT_DEPTH_M))
         _clear_start_platform(terrain, 2.0)
     else:
         raise ValueError(f"Unknown MGDP terrain type: {terrain_type}")
@@ -502,6 +509,7 @@ class MGDPTerrainCfg(SubTerrainBaseCfg):
     function = mgdp_terrain
 
     terrain_type: str | None = None
+    seed: int | None = None
     gap_cfg: MGDPGapParkourCfg = MGDP_GAP_PARKOUR_CFG
     horizontal_scale: float = 0.05
     vertical_scale: float = 0.005

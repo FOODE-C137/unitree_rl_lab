@@ -1,4 +1,5 @@
 import math
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -25,13 +26,28 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from .mgdp_terrain import MGDP_TERRAIN_GENERATOR_CFG
 
 
+def _seed_from_start_minute_second() -> int:
+    now = datetime.now()
+    return now.minute * 100 + now.second
+
+
+GO2_MARG_ORACLE_RISK_TERRAIN_SEED = _seed_from_start_minute_second()
+
 GO2_MODIFIED_DESCRIPTION_DIR = Path(__file__).resolve().parents[7] / "LidarSim2Real/go2_urdf_modified"
 GO2_MODIFIED_URDF_PATH = GO2_MODIFIED_DESCRIPTION_DIR / "urdf/go2_description.urdf"
 GO2_MODIFIED_DAE_DIR = GO2_MODIFIED_DESCRIPTION_DIR / "dae"
 
 
+def _set_mgdp_terrain_seed(terrain_generator_cfg, seed: int) -> None:
+    for sub_cfg in terrain_generator_cfg.sub_terrains.values():
+        sub_cfg.seed = seed
+
+
 def _active_subterrain_count(terrain_generator_cfg) -> int:
     return max(1, sum(float(sub_cfg.proportion) > 0.0 for sub_cfg in terrain_generator_cfg.sub_terrains.values()))
+
+
+_set_mgdp_terrain_seed(MGDP_TERRAIN_GENERATOR_CFG, GO2_MARG_ORACLE_RISK_TERRAIN_SEED)
 
 
 GO2_MARG_ORACLE_SPAWN_CFG = ROBOT_CFG.spawn.replace(asset_path=str(GO2_MODIFIED_URDF_PATH))

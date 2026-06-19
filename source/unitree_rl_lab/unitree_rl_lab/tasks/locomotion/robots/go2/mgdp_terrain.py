@@ -601,11 +601,11 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             two_rows=True,
             depth=MGDP_PIT_DEPTH_M,
             platform_size=2.0,
-            lateral_stone_scale=0.25,
+            lateral_stone_scale=0.5,
             lateral_gap_scale=1.0,
             forward_gap_scale=0.5,
             forward_stone_scale=1.0 / 2.0,
-            height_scale=1.0,
+            height_scale=0.5,
         )
     elif terrain_type == "stones_2rows_staggered":
         _stones_everywhere(
@@ -617,11 +617,11 @@ def mgdp_terrain(difficulty: float, cfg: "MGDPTerrainCfg") -> tuple[list[trimesh
             staggered_rows=True,
             depth=MGDP_PIT_DEPTH_M,
             platform_size=2.0,
-            lateral_stone_scale=0.25,
+            lateral_stone_scale=0.5,
             lateral_gap_scale=1.0,
             forward_gap_scale=0.5,
             forward_stone_scale=1.0 / 2.0,
-            height_scale=1.0,
+            height_scale=0.25,
         )
     elif terrain_type == "stones_1row":
         _stones_everywhere(
@@ -701,7 +701,7 @@ class MGDPTerrainCfg(SubTerrainBaseCfg):
     seed: int | None = None
     gap_cfg: MGDPGapParkourCfg = MGDP_GAP_PARKOUR_CFG
     horizontal_scale: float = 0.05
-    vertical_scale: float = 0.005
+    vertical_scale: float = 0.01
     outer_wall_edges: tuple[bool, bool, bool, bool] = (False, False, False, False)
     outer_wall_top_z: float = 0.0
     air_first_top_z: float = 0.0
@@ -715,7 +715,7 @@ MGDP_GAP_PARKOUR_TERRAIN_GENERATOR_CFG = TerrainGeneratorCfg(
     num_rows=10,
     num_cols=10,
     horizontal_scale=0.05,
-    vertical_scale=0.005,
+    vertical_scale=0.01,
     difficulty_range=(0.0, 1.0),
     curriculum=True,
     use_cache=False,

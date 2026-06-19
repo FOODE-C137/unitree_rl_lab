@@ -9,7 +9,10 @@ except ImportError:
     from isaaclab.utils.math import quat_rotate_inverse as quat_apply_inverse
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.markers import VisualizationMarkers
+from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 from isaaclab.sensors import ContactSensor
+from isaaclab.utils.warp import raycast_mesh
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -268,6 +271,81 @@ def _query_terrain_height_from_scanner(
     return terrain_z.view(num_envs, num_feet, num_samples)
 
 
+def _foot_center_offsets_xy(device: str, dtype: torch.dtype, spacing: float) -> torch.Tensor:
+    return torch.tensor(
+        [
+            [0.0, 0.0],
+            [spacing, 0.0],
+            [-spacing, 0.0],
+            [0.0, spacing],
+            [0.0, -spacing],
+            [spacing, spacing],
+            [spacing, -spacing],
+            [-spacing, spacing],
+            [-spacing, -spacing],
+        ],
+        device=device,
+        dtype=dtype,
+    )
+
+
+def _query_terrain_height_by_foot_raycast(
+    env: ManagerBasedRLEnv,
+    foot_pos_w: torch.Tensor,
+    height_sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+    spacing: float = 0.05,
+    return_hits: bool = False,
+) -> torch.Tensor:
+    """Terrain heights from foot-centered 3x3 ray casts using the shared height scanner mesh."""
+
+    num_envs, num_feet, _ = foot_pos_w.shape
+    if height_sensor_cfg.name not in env.scene.sensors:
+        terrain_z = torch.zeros((num_envs, num_feet, 9), device=env.device, dtype=foot_pos_w.dtype)
+        return (terrain_z, None) if return_hits else terrain_z
+
+    height_sensor = env.scene.sensors[height_sensor_cfg.name]
+    if not height_sensor.meshes:
+        terrain_z = torch.zeros((num_envs, num_feet, 9), device=env.device, dtype=foot_pos_w.dtype)
+        return (terrain_z, None) if return_hits else terrain_z
+
+    mesh = height_sensor.meshes[height_sensor.cfg.mesh_prim_paths[0]]
+    offsets_xy = _foot_center_offsets_xy(env.device, foot_pos_w.dtype, spacing)
+    ray_starts_w = foot_pos_w[:, :, None, :].expand(-1, -1, 9, -1).clone()
+    ray_starts_w[..., 0:2] += offsets_xy[None, None, :, :]
+    ray_starts_w[..., 2] += 20.0
+
+    ray_directions_w = torch.zeros_like(ray_starts_w)
+    ray_directions_w[..., 2] = -1.0
+
+    ray_hits_w = raycast_mesh(
+        ray_starts_w.reshape(-1, 3),
+        ray_directions_w.reshape(-1, 3),
+        mesh=mesh,
+        max_dist=height_sensor.cfg.max_distance,
+    )[0]
+    ray_hits_w = ray_hits_w.view(num_envs, num_feet, 9, 3)
+    terrain_z = ray_hits_w[..., 2]
+    return (terrain_z, ray_hits_w) if return_hits else terrain_z
+
+
+def _visualize_feet_center_raycast_hits(
+    env: ManagerBasedRLEnv,
+    ray_hits_w: torch.Tensor | None,
+    debug_env_count: int,
+) -> None:
+    if ray_hits_w is None or debug_env_count <= 0:
+        return
+
+    if not hasattr(env, "_feet_center_raycast_visualizer"):
+        marker_cfg = RAY_CASTER_MARKER_CFG.replace(prim_path="/Visuals/FeetCenterRaycast")
+        env._feet_center_raycast_visualizer = VisualizationMarkers(marker_cfg)
+
+    num_envs_to_show = min(debug_env_count, ray_hits_w.shape[0])
+    viz_points = ray_hits_w[:num_envs_to_show].reshape(-1, 3)
+    viz_points = viz_points[~torch.any(torch.isinf(viz_points), dim=1)]
+    env._feet_center_raycast_visualizer.visualize(viz_points)
+
+
 def feet_center(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
@@ -277,6 +355,9 @@ def feet_center(
     d2: float = 0.0707,
     edge_height_threshold: float = -0.20,
     height_sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+    use_foot_local_raycast: bool = False,
+    debug_vis: bool = False,
+    debug_env_count: int = 1,
 ) -> torch.Tensor:
     """MARG-style foothold edge penalty around each contacted foot.
 
@@ -294,38 +375,29 @@ def feet_center(
     contact_forces_w = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
     feet_contact = torch.norm(contact_forces_w, dim=-1) > 1.0
 
-    # 3) 9-point sampling pattern around each foot in world XY.
-    offsets_xy = torch.tensor(
-        [
-            [0.0, 0.0],
-            [d1, 0.0],
-            [-d1, 0.0],
-            [0.0, d1],
-            [0.0, -d1],
-            [d1, d1],
-            [d1, -d1],
-            [-d1, d1],
-            [-d1, -d1],
-        ],
-        device=env.device,
-        dtype=foot_pos_w.dtype,
-    )
-    sample_xy_w = foot_pos_w[:, :, None, 0:2] + offsets_xy[None, None, :, :]
+    # 3) Query terrain height: [E, F, 9].
+    if use_foot_local_raycast:
+        terrain_z, ray_hits_w = _query_terrain_height_by_foot_raycast(
+            env, foot_pos_w, height_sensor_cfg, spacing=d1, return_hits=True
+        )
+        if debug_vis:
+            _visualize_feet_center_raycast_hits(env, ray_hits_w, debug_env_count)
+    else:
+        offsets_xy = _foot_center_offsets_xy(env.device, foot_pos_w.dtype, d1)
+        sample_xy_w = foot_pos_w[:, :, None, 0:2] + offsets_xy[None, None, :, :]
+        terrain_z = _query_terrain_height_from_scanner(env, sample_xy_w, height_sensor_cfg=height_sensor_cfg)
 
-    # 4) Query terrain height from scanner: [E, F, 9]
-    terrain_z = _query_terrain_height_from_scanner(env, sample_xy_w, height_sensor_cfg=height_sensor_cfg)
-
-    # 5) Relative heights around each foot.
+    # 4) Relative heights around each foot.
     center_z = terrain_z[:, :, 0:1]
     rel_h = terrain_z - center_z
 
-    # 6) Edge detection on cross and diagonal neighbors.
+    # 5) Edge detection on cross and diagonal neighbors.
     type2_bad = rel_h[:, :, 1:5] < edge_height_threshold
     type3_bad = rel_h[:, :, 5:9] < edge_height_threshold
     n2 = type2_bad.any(dim=-1).float()
     n3 = type3_bad.any(dim=-1).float()
 
-    # 7) Per-foot penalty, then sum over feet.
+    # 6) Per-foot penalty, then sum over feet.
     per_foot_penalty = feet_contact.float() * (n2 + 2.0 * n3)
     penalty = torch.sum(per_foot_penalty, dim=1)
 

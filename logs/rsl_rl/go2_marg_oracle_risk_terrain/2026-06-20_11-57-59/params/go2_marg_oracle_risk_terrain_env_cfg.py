@@ -754,7 +754,7 @@ class RewardsCfg:
     )
     feet_center = RewTerm(
         func=mdp.feet_center,
-        weight=-0.01,
+        weight=-0.1,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"], preserve_order=True

@@ -762,9 +762,7 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"], preserve_order=True
             ),
-            "command_name": "base_velocity",
             "height_sensor_cfg": SceneEntityCfg("height_scanner"),
-            "use_foot_local_raycast": True,
             "debug_vis": False,
             "debug_env_count": 1,
         },

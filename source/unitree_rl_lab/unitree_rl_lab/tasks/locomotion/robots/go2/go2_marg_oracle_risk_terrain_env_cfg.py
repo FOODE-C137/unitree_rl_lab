@@ -867,6 +867,6 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         self.scene.terrain.terrain_generator.num_cols = _active_subterrain_count(self.scene.terrain.terrain_generator)
         self.commands.base_velocity.ranges = deepcopy(self.commands.base_velocity.limit_ranges)
         self.events.push_robot = None
-        self.terminations.feet_on_base_plane_linear = None
+        # self.terminations.feet_on_base_plane_linear = None
         self.rewards.feet_center.params["debug_vis"] = True
         self.rewards.feet_center.params["debug_env_count"] = 1

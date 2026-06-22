@@ -178,6 +178,23 @@ def _select_terrain_column(env, column: int):
     terrain.env_origins[env_id] = terrain.terrain_origins[terrain.terrain_levels[env_id], terrain.terrain_types[env_id]]
 
 
+def _adjust_terrain_level(env, delta: int) -> int:
+    """Move env 0 up/down generated terrain difficulty rows before reset."""
+    terrain = env.unwrapped.scene.terrain
+    if terrain is None or terrain.terrain_origins is None:
+        raise RuntimeError("Keyboard terrain level selection requires generated terrain origins.")
+
+    env_id = torch.tensor([0], dtype=torch.long, device=terrain.device)
+    max_level = terrain.terrain_origins.shape[0] - 1
+    terrain.terrain_levels[env_id] = torch.clamp(terrain.terrain_levels[env_id] + int(delta), min=0, max=max_level)
+    terrain.env_origins[env_id] = terrain.terrain_origins[terrain.terrain_levels[env_id], terrain.terrain_types[env_id]]
+    return int(terrain.terrain_levels[0].item())
+
+
+def _terrain_key_for_column(column: int) -> str:
+    return "0" if column == 9 else str(column + 1)
+
+
 def _update_follow_camera(env):
     """Keep the viewport camera in a fixed third-person view behind the keyboard-controlled robot."""
     if not args_cli.keyboard:
@@ -217,6 +234,8 @@ def main():
     )
     if args_cli.keyboard and hasattr(env_cfg, "terminations") and hasattr(env_cfg.terminations, "time_out"):
         env_cfg.terminations.time_out = None
+    if args_cli.keyboard and hasattr(env_cfg, "curriculum") and hasattr(env_cfg.curriculum, "terrain_levels"):
+        env_cfg.curriculum.terrain_levels = None
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments
@@ -307,6 +326,7 @@ def main():
     keyboard_speed_scale = 1.0
     reset_requested = False
     pending_terrain_column = None
+    pending_terrain_level_delta = 0
     terrain_column_names = []
 
     def request_reset():
@@ -318,6 +338,15 @@ def main():
         pending_terrain_column = column
         reset_requested = True
         print(f"[INFO]: Requested terrain {column + 1}: {terrain_column_names[column]}")
+
+    def request_terrain_level_reset(delta: int):
+        nonlocal pending_terrain_level_delta, reset_requested
+        pending_terrain_level_delta = int(delta)
+        reset_requested = True
+        direction = (
+            "unchanged" if pending_terrain_level_delta == 0 else ("up" if pending_terrain_level_delta > 0 else "down")
+        )
+        print(f"[INFO]: Requested terrain level {direction}: {pending_terrain_level_delta:+d}")
 
     def adjust_keyboard_speed(delta: float):
         nonlocal keyboard_speed_scale
@@ -339,11 +368,14 @@ def main():
         keyboard.add_callback("ENTER", request_reset)
         keyboard.add_callback("A", lambda: adjust_keyboard_speed(-args_cli.keyboard_speed_step))
         keyboard.add_callback("D", lambda: adjust_keyboard_speed(args_cli.keyboard_speed_step))
+        keyboard.add_callback("W", lambda: request_terrain_level_reset(1))
+        keyboard.add_callback("S", lambda: request_terrain_level_reset(-1))
         terrain_column_names = _get_terrain_column_names(env)
-        for column, _ in enumerate(terrain_column_names[:9]):
+        for column, _ in enumerate(terrain_column_names[:10]):
             callback = lambda column=column: request_terrain_reset(column)
-            keyboard.add_callback(f"KEY_{column + 1}", callback)
-            keyboard.add_callback(str(column + 1), callback)
+            key = _terrain_key_for_column(column)
+            keyboard.add_callback(f"KEY_{key}", callback)
+            keyboard.add_callback(key, callback)
         print(keyboard)
         print("\tReset robot pose: ENTER")
         print(
@@ -351,10 +383,11 @@ def main():
             f"({args_cli.keyboard_speed_min:.1f}-{args_cli.keyboard_speed_max:.1f}, "
             f"step {args_cli.keyboard_speed_step:.1f})"
         )
+        print("\tChange terrain level and respawn: W/S")
         if terrain_column_names:
             print("\tSelect terrain and respawn:")
-            for column, terrain_name in enumerate(terrain_column_names[:9]):
-                print(f"\t  {column + 1}: {terrain_name}")
+            for column, terrain_name in enumerate(terrain_column_names[:10]):
+                print(f"\t  {_terrain_key_for_column(column)}: {terrain_name}")
         else:
             print("\tSelect terrain and respawn: unavailable for this terrain config")
         filtered_keyboard_command = torch.zeros(3, device=env.unwrapped.device)
@@ -378,9 +411,20 @@ def main():
         with torch.inference_mode():
             if reset_requested:
                 selected_terrain_name = None
+                selected_terrain_column = None
                 if pending_terrain_column is not None:
                     _select_terrain_column(env, pending_terrain_column)
+                    selected_terrain_column = pending_terrain_column
                     selected_terrain_name = terrain_column_names[pending_terrain_column]
+                if pending_terrain_level_delta != 0:
+                    _adjust_terrain_level(env, pending_terrain_level_delta)
+                    if selected_terrain_column is None:
+                        terrain = env.unwrapped.scene.terrain
+                        selected_terrain_column = int(terrain.terrain_types[0].item())
+                        if selected_terrain_column < len(terrain_column_names):
+                            selected_terrain_name = terrain_column_names[selected_terrain_column]
+                        else:
+                            selected_terrain_name = f"column {selected_terrain_column + 1}"
                 obs, extras = env.reset()
                 obs_dict = extras["observations"]
                 if keyboard is not None:
@@ -395,10 +439,11 @@ def main():
                     terrain = env.unwrapped.scene.terrain
                     terrain_level = int(terrain.terrain_levels[0].item())
                     print(
-                        f"[INFO]: Respawned on terrain {pending_terrain_column + 1}: "
+                        f"[INFO]: Respawned on terrain {selected_terrain_column + 1}: "
                         f"{selected_terrain_name} (level {terrain_level})"
                     )
-                    pending_terrain_column = None
+                pending_terrain_column = None
+                pending_terrain_level_delta = 0
                 reset_requested = False
 
             command = None
